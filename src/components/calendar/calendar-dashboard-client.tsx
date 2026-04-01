@@ -6,11 +6,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import type { DateClickArg, EventResizeDoneArg } from "@fullcalendar/interaction";
-import type {
-  EventClickArg,
-  EventDropArg,
-  EventInput,
-} from "@fullcalendar/core";
+import type { EventClickArg, EventDropArg, EventInput } from "@fullcalendar/core";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
 import { EmptyState } from "@/components/dashboard/empty-state";
