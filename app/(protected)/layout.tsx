@@ -7,7 +7,7 @@ import { TopBar } from "@/components/layout/top-bar";
 import { hasSupabaseBrowserConfig } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-async function signOutAction(_formData: FormData) {
+async function signOutAction() {
   "use server";
 
   const supabase = await createSupabaseServerClient();
