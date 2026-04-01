@@ -5,12 +5,11 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import timeGridPlugin from "@fullcalendar/timegrid";
+import type { DateClickArg, EventResizeDoneArg } from "@fullcalendar/interaction";
 import type {
-  DateClickArg,
   EventClickArg,
   EventDropArg,
   EventInput,
-  EventResizeDoneArg
 } from "@fullcalendar/core";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
