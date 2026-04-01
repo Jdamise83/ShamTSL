@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 32% 97%;
+  --foreground: 218 56% 18%;
+  --card: 0 0% 100%;
+  --card-foreground: 218 56% 18%;
+  --primary: 211 71% 48%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 210 45% 94%;
+  --secondary-foreground: 218 56% 22%;
+  --muted: 210 40% 95%;
+  --muted-foreground: 216 23% 42%;
+  --accent: 207 100% 96%;
+  --accent-foreground: 214 74% 34%;
+  --success: 150 61% 39%;
+  --success-foreground: 0 0% 100%;
+  --danger: 0 70% 50%;
+  --danger-foreground: 0 0% 100%;
+  --border: 210 28% 89%;
+  --input: 210 30% 88%;
+  --ring: 211 71% 48%;
+}
+
+* {
+  @apply border-border;
+}
+
+body {
+  @apply bg-background text-foreground font-sans antialiased;
+}
+
+.fc .fc-toolbar-title {
+  @apply text-xl font-heading uppercase tracking-wide text-foreground;
+}
+
+.fc .fc-button-primary {
+  background-color: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+}
+
+.fc .fc-button-primary:disabled {
+  background-color: hsl(var(--muted-foreground));
+  border-color: hsl(var(--muted-foreground));
+}
+
+.fc .fc-daygrid-event,
+.fc .fc-timegrid-event {
+  @apply rounded-lg border-0 shadow-sm;
+}
+
+.fc-theme-standard td,
+.fc-theme-standard th,
+.fc-theme-standard .fc-scrollgrid {
+  border-color: hsl(var(--border));
+}
