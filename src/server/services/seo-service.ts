@@ -60,6 +60,12 @@ type SearchConsoleQueryBody = {
   type?: "web" | "discover" | "googleNews" | "news";
 };
 
+type ResolvedSearchConsoleSite = {
+  siteUrl: string;
+  accessibleSites: string[];
+  hadDataOnProbe: boolean;
+};
+
 const SEARCH_CONSOLE_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
 const SEARCH_CONSOLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SEARCH_CONSOLE_QUERY_BASE = "https://www.googleapis.com/webmasters/v3/sites";
@@ -331,6 +337,55 @@ class RealSeoProvider implements SeoProvider {
     return [...candidates];
   }
 
+  private normalizeSiteUrl(siteUrl: string) {
+    return siteUrl.trim().toLowerCase().replace(/\/+$/, "");
+  }
+
+  private extractComparableHost(siteUrl: string) {
+    const trimmed = siteUrl.trim().toLowerCase();
+    if (trimmed.startsWith("sc-domain:")) {
+      return trimmed.replace("sc-domain:", "").replace(/^www\./, "");
+    }
+
+    const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    try {
+      return new URL(withProtocol).hostname.replace(/^www\./, "");
+    } catch {
+      return withProtocol
+        .replace(/^https?:\/\//, "")
+        .split("/")[0]
+        .replace(/^www\./, "");
+    }
+  }
+
+  private getRankedSiteCandidates(configuredSiteUrl: string, accessibleSites: string[]) {
+    const configuredCandidates = this.getSiteUrlCandidates(configuredSiteUrl);
+    const configuredCandidateSet = new Set(configuredCandidates.map((candidate) => this.normalizeSiteUrl(candidate)));
+    const configuredHost = this.extractComparableHost(configuredSiteUrl);
+    const uniqueCandidates = [...new Set([...configuredCandidates, ...accessibleSites])];
+
+    return uniqueCandidates
+      .map((candidate) => {
+        const normalizedCandidate = this.normalizeSiteUrl(candidate);
+        const candidateHost = this.extractComparableHost(candidate);
+        let score = 0;
+
+        if (configuredCandidateSet.has(normalizedCandidate)) {
+          score += 100;
+        }
+        if (candidateHost === configuredHost) {
+          score += 40;
+        }
+        if (candidate.startsWith("sc-domain:") && candidateHost === configuredHost) {
+          score += 10;
+        }
+
+        return { candidate, score };
+      })
+      .sort((a, b) => b.score - a.score)
+      .map((entry) => entry.candidate);
+  }
+
   private async listAccessibleSites(accessToken: string): Promise<string[]> {
     try {
       const response = await fetch(`${SEARCH_CONSOLE_QUERY_BASE}`, {
@@ -355,50 +410,82 @@ class RealSeoProvider implements SeoProvider {
   }
 
   private async runSearchQuery(
-    config: SearchConsoleConfig,
+    siteUrl: string,
     accessToken: string,
     body: SearchConsoleQueryBody
   ): Promise<SearchConsoleRow[]> {
-    const siteUrlCandidates = this.getSiteUrlCandidates(config.siteUrl);
-    let lastError: unknown;
+    const endpoint = `${SEARCH_CONSOLE_QUERY_BASE}/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
 
-    for (const siteUrl of siteUrlCandidates) {
-      const endpoint = `${SEARCH_CONSOLE_QUERY_BASE}/${encodeURIComponent(
-        siteUrl
-      )}/searchAnalytics/query`;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        ...body,
+        dataState: body.dataState ?? "all",
+        type: body.type ?? "web"
+      })
+    });
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          ...body,
-          dataState: body.dataState ?? "all",
-          type: body.type ?? "web"
-        })
-      });
-
-      const payload = await this.parseJsonSafe(response);
-      if (response.ok) {
-        return ((payload as { rows?: SearchConsoleRow[] }).rows ?? []).map((row) => ({
-          clicks: Number(row.clicks ?? 0),
-          impressions: Number(row.impressions ?? 0),
-          ctr: Number(row.ctr ?? 0),
-          position: Number(row.position ?? 0),
-          keys: Array.isArray(row.keys) ? row.keys : []
-        }));
-      }
-
-      lastError = new Error(
+    const payload = await this.parseJsonSafe(response);
+    if (!response.ok) {
+      throw new Error(
         `Search Console query error (${response.status}) for site "${siteUrl}": ${this.getApiErrorMessage(
           payload
         )}`
       );
     }
 
-    throw lastError instanceof Error ? lastError : new Error("Search Console query failed");
+    return ((payload as { rows?: SearchConsoleRow[] }).rows ?? []).map((row) => ({
+      clicks: Number(row.clicks ?? 0),
+      impressions: Number(row.impressions ?? 0),
+      ctr: Number(row.ctr ?? 0),
+      position: Number(row.position ?? 0),
+      keys: Array.isArray(row.keys) ? row.keys : []
+    }));
+  }
+
+  private async resolveSiteUrl(
+    config: SearchConsoleConfig,
+    accessToken: string
+  ): Promise<ResolvedSearchConsoleSite> {
+    const accessibleSites = await this.listAccessibleSites(accessToken);
+    const rankedCandidates = this.getRankedSiteCandidates(config.siteUrl, accessibleSites);
+
+    const probeBody: SearchConsoleQueryBody = {
+      startDate: this.toIsoDate(this.daysAgo(28)),
+      endDate: this.toIsoDate(this.daysAgo(1)),
+      rowLimit: 1
+    };
+
+    let reachableSite: string | null = null;
+
+    for (const candidate of rankedCandidates) {
+      try {
+        const rows = await this.runSearchQuery(candidate, accessToken, probeBody);
+        if (!reachableSite) {
+          reachableSite = candidate;
+        }
+
+        if (this.hasRowData(rows)) {
+          return {
+            siteUrl: candidate,
+            accessibleSites,
+            hadDataOnProbe: true
+          };
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return {
+      siteUrl: reachableSite ?? rankedCandidates[0] ?? config.siteUrl,
+      accessibleSites,
+      hadDataOnProbe: false
+    };
   }
 
   private formatInteger(value: number) {
@@ -459,15 +546,12 @@ class RealSeoProvider implements SeoProvider {
     return rows.some((row) => Number(row.clicks ?? 0) > 0 || Number(row.impressions ?? 0) > 0);
   }
 
-  private async getKpiGroups(
-    config: SearchConsoleConfig,
-    accessToken: string
-  ): Promise<KpiGroupsResult> {
+  private async getKpiGroups(siteUrl: string, accessToken: string): Promise<KpiGroupsResult> {
     const periods = this.getReportingPeriods();
 
     const periodRows = await Promise.all(
       periods.map((period) =>
-        this.runSearchQuery(config, accessToken, {
+        this.runSearchQuery(siteUrl, accessToken, {
           startDate: period.startDate,
           endDate: period.endDate,
           rowLimit: 25000
@@ -515,8 +599,8 @@ class RealSeoProvider implements SeoProvider {
     };
   }
 
-  private async getTrendData(config: SearchConsoleConfig, accessToken: string) {
-    const rows = await this.runSearchQuery(config, accessToken, {
+  private async getTrendData(siteUrl: string, accessToken: string) {
+    const rows = await this.runSearchQuery(siteUrl, accessToken, {
       startDate: this.toIsoDate(this.daysAgo(14)),
       endDate: this.toIsoDate(this.daysAgo(1)),
       dimensions: ["date"],
@@ -531,8 +615,8 @@ class RealSeoProvider implements SeoProvider {
       }));
   }
 
-  private async getSplitData(config: SearchConsoleConfig, accessToken: string) {
-    const rows = await this.runSearchQuery(config, accessToken, {
+  private async getSplitData(siteUrl: string, accessToken: string) {
+    const rows = await this.runSearchQuery(siteUrl, accessToken, {
       startDate: this.toIsoDate(this.daysAgo(30)),
       endDate: this.toIsoDate(this.daysAgo(1)),
       dimensions: ["query"],
@@ -570,8 +654,8 @@ class RealSeoProvider implements SeoProvider {
     ];
   }
 
-  private async getTopQueryRows(config: SearchConsoleConfig, accessToken: string) {
-    const rows = await this.runSearchQuery(config, accessToken, {
+  private async getTopQueryRows(siteUrl: string, accessToken: string) {
+    const rows = await this.runSearchQuery(siteUrl, accessToken, {
       startDate: this.toIsoDate(this.daysAgo(28)),
       endDate: this.toIsoDate(this.daysAgo(1)),
       dimensions: ["query"],
@@ -589,8 +673,8 @@ class RealSeoProvider implements SeoProvider {
       }));
   }
 
-  private async getTopPageRows(config: SearchConsoleConfig, accessToken: string) {
-    const rows = await this.runSearchQuery(config, accessToken, {
+  private async getTopPageRows(siteUrl: string, accessToken: string) {
+    const rows = await this.runSearchQuery(siteUrl, accessToken, {
       startDate: this.toIsoDate(this.daysAgo(28)),
       endDate: this.toIsoDate(this.daysAgo(1)),
       dimensions: ["page"],
@@ -652,20 +736,28 @@ class RealSeoProvider implements SeoProvider {
 
       const config = this.getConfig();
       const accessToken = await this.getAccessToken(config);
+      const resolvedSite = await this.resolveSiteUrl(config, accessToken);
 
-      const [kpiResult, trend, split, topQueries, topPages, accessibleSites] = await Promise.all([
-        this.getKpiGroups(config, accessToken),
-        this.getTrendData(config, accessToken),
-        this.getSplitData(config, accessToken),
-        this.getTopQueryRows(config, accessToken),
-        this.getTopPageRows(config, accessToken),
-        this.listAccessibleSites(accessToken)
+      const [kpiResult, trend, split, topQueries, topPages] = await Promise.all([
+        this.getKpiGroups(resolvedSite.siteUrl, accessToken),
+        this.getTrendData(resolvedSite.siteUrl, accessToken),
+        this.getSplitData(resolvedSite.siteUrl, accessToken),
+        this.getTopQueryRows(resolvedSite.siteUrl, accessToken),
+        this.getTopPageRows(resolvedSite.siteUrl, accessToken)
       ]);
+
+      console.info("[SEO] Using Search Console property.", {
+        configuredSiteUrl: config.siteUrl,
+        selectedSiteUrl: resolvedSite.siteUrl,
+        accessibleSitesCount: resolvedSite.accessibleSites.length,
+        hadDataOnProbe: resolvedSite.hadDataOnProbe
+      });
 
       if (!kpiResult.hasData && !trend.length && !topQueries.length && !topPages.length) {
         console.warn("[SEO] Connected but no Search Console data returned.", {
           configuredSiteUrl: config.siteUrl,
-          accessibleSites
+          selectedSiteUrl: resolvedSite.siteUrl,
+          accessibleSites: resolvedSite.accessibleSites
         });
       }
 
