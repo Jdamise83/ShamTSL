@@ -17,7 +17,14 @@ import { cn } from "@/lib/utils";
 
 type SidebarRole = "admin" | "staff";
 
-const allNavigation = [
+type NavigationItem = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  roles: SidebarRole[];
+};
+
+const allNavigation: NavigationItem[] = [
   { href: "/home", label: "Home", icon: Home, roles: ["admin"] },
   { href: "/calendar", label: "Calendar", icon: Calendar, roles: ["admin"] },
   { href: "/holidays", label: "Holidays", icon: Umbrella, roles: ["admin", "staff"] },
@@ -26,7 +33,7 @@ const allNavigation = [
   { href: "/ga4", label: "GA4", icon: ChartColumn, roles: ["admin"] },
   { href: "/unleashed", label: "Unleashed", icon: Factory, roles: ["admin"] },
   { href: "/settings", label: "Settings", icon: Cog, roles: ["admin"] }
-] as const;
+];
 
 export function SidebarNav({ role }: { role: SidebarRole }) {
   const pathname = usePathname();
