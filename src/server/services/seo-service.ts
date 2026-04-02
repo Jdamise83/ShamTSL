@@ -90,18 +90,33 @@ class RealSeoProvider implements SeoProvider {
   }
 
   private getConfig(): SearchConsoleConfig {
-    const siteUrl = this.readFirstEnv(
-      ["SEARCH_CONSOLE_SITE_URL", "GSC_SITE_URL", "GOOGLE_SEARCH_CONSOLE_SITE_URL"],
-      "SEARCH_CONSOLE_SITE_URL"
-    );
+    const siteUrl =
+      this.readEnv("SEARCH_CONSOLE_SITE_URL") ||
+      this.readEnv("GSC_SITE_URL") ||
+      this.readEnv("GOOGLE_SEARCH_CONSOLE_SITE_URL") ||
+      this.readEnv("SEARCH_CONSOLE_PROPERTY") ||
+      this.readEnv("SITE_URL") ||
+      this.readEnv("NEXT_PUBLIC_SITE_URL");
 
     const clientEmail = this.readFirstEnv(
-      ["SEARCH_CONSOLE_CLIENT_EMAIL", "GOOGLE_CLIENT_EMAIL", "GA4_CLIENT_EMAIL"],
+      [
+        "SEARCH_CONSOLE_CLIENT_EMAIL",
+        "GSC_CLIENT_EMAIL",
+        "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+        "GOOGLE_CLIENT_EMAIL",
+        "GA4_CLIENT_EMAIL"
+      ],
       "SEARCH_CONSOLE_CLIENT_EMAIL"
     );
 
     const privateKey = this.readFirstEnv(
-      ["SEARCH_CONSOLE_PRIVATE_KEY", "GOOGLE_PRIVATE_KEY", "GA4_PRIVATE_KEY"],
+      [
+        "SEARCH_CONSOLE_PRIVATE_KEY",
+        "GSC_PRIVATE_KEY",
+        "GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY",
+        "GOOGLE_PRIVATE_KEY",
+        "GA4_PRIVATE_KEY"
+      ],
       "SEARCH_CONSOLE_PRIVATE_KEY"
     ).replace(/\\n/g, "\n");
 
@@ -109,14 +124,25 @@ class RealSeoProvider implements SeoProvider {
   }
 
   private getEnvHealth(): SearchConsoleEnvHealth {
-    const hasSiteUrl = Boolean(this.readEnv("SEARCH_CONSOLE_SITE_URL"));
+    const hasSiteUrl = Boolean(
+      this.readEnv("SEARCH_CONSOLE_SITE_URL") ||
+        this.readEnv("GSC_SITE_URL") ||
+        this.readEnv("GOOGLE_SEARCH_CONSOLE_SITE_URL") ||
+        this.readEnv("SEARCH_CONSOLE_PROPERTY") ||
+        this.readEnv("SITE_URL") ||
+        this.readEnv("NEXT_PUBLIC_SITE_URL")
+    );
     const hasClientEmail = Boolean(
       this.readEnv("SEARCH_CONSOLE_CLIENT_EMAIL") ||
+        this.readEnv("GSC_CLIENT_EMAIL") ||
+        this.readEnv("GOOGLE_SERVICE_ACCOUNT_EMAIL") ||
         this.readEnv("GOOGLE_CLIENT_EMAIL") ||
         this.readEnv("GA4_CLIENT_EMAIL")
     );
     const hasPrivateKey = Boolean(
       this.readEnv("SEARCH_CONSOLE_PRIVATE_KEY") ||
+        this.readEnv("GSC_PRIVATE_KEY") ||
+        this.readEnv("GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY") ||
         this.readEnv("GOOGLE_PRIVATE_KEY") ||
         this.readEnv("GA4_PRIVATE_KEY")
     );
@@ -125,7 +151,7 @@ class RealSeoProvider implements SeoProvider {
       hasSiteUrl,
       hasClientEmail,
       hasPrivateKey,
-      hasRequiredEnv: hasSiteUrl && hasClientEmail && hasPrivateKey
+      hasRequiredEnv: hasClientEmail && hasPrivateKey
     };
   }
 
@@ -359,9 +385,12 @@ class RealSeoProvider implements SeoProvider {
   }
 
   private getRankedSiteCandidates(configuredSiteUrl: string, accessibleSites: string[]) {
-    const configuredCandidates = this.getSiteUrlCandidates(configuredSiteUrl);
-    const configuredCandidateSet = new Set(configuredCandidates.map((candidate) => this.normalizeSiteUrl(candidate)));
-    const configuredHost = this.extractComparableHost(configuredSiteUrl);
+    const hasConfiguredSite = Boolean(configuredSiteUrl.trim());
+    const configuredCandidates = hasConfiguredSite ? this.getSiteUrlCandidates(configuredSiteUrl) : [];
+    const configuredCandidateSet = new Set(
+      configuredCandidates.map((candidate) => this.normalizeSiteUrl(candidate))
+    );
+    const configuredHost = hasConfiguredSite ? this.extractComparableHost(configuredSiteUrl) : "";
     const uniqueCandidates = [...new Set([...configuredCandidates, ...accessibleSites])];
 
     return uniqueCandidates
@@ -373,10 +402,10 @@ class RealSeoProvider implements SeoProvider {
         if (configuredCandidateSet.has(normalizedCandidate)) {
           score += 100;
         }
-        if (candidateHost === configuredHost) {
+        if (configuredHost && candidateHost === configuredHost) {
           score += 40;
         }
-        if (candidate.startsWith("sc-domain:") && candidateHost === configuredHost) {
+        if (configuredHost && candidate.startsWith("sc-domain:") && candidateHost === configuredHost) {
           score += 10;
         }
 
@@ -481,8 +510,15 @@ class RealSeoProvider implements SeoProvider {
       }
     }
 
+    const fallbackSite = reachableSite ?? rankedCandidates[0];
+    if (!fallbackSite) {
+      throw new Error(
+        "Search Console has no accessible properties for this service account. Add the service account email to the Search Console property as an Owner."
+      );
+    }
+
     return {
-      siteUrl: reachableSite ?? rankedCandidates[0] ?? config.siteUrl,
+      siteUrl: fallbackSite,
       accessibleSites,
       hadDataOnProbe: false
     };
@@ -794,7 +830,13 @@ class RealSeoProvider implements SeoProvider {
       console.error("[SEO] Search Console connection failed:", {
         error: errorMessage,
         envHealth,
-        configuredSiteUrl: this.readEnv("SEARCH_CONSOLE_SITE_URL"),
+        configuredSiteUrl:
+          this.readEnv("SEARCH_CONSOLE_SITE_URL") ||
+          this.readEnv("GSC_SITE_URL") ||
+          this.readEnv("GOOGLE_SEARCH_CONSOLE_SITE_URL") ||
+          this.readEnv("SEARCH_CONSOLE_PROPERTY") ||
+          this.readEnv("SITE_URL") ||
+          this.readEnv("NEXT_PUBLIC_SITE_URL"),
         accessibleSites
       });
       return this.fallback();
