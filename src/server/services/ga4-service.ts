@@ -72,33 +72,14 @@ class RealGa4Provider implements Ga4Provider {
 
       const client = this.getClient();
 
-      const [yesterdayReport] = await client.runReport({
+      const [report] = await client.runReport({
         property: `properties/${propertyId}`,
-        dateRanges: [{ startDate: "yesterday", endDate: "yesterday" }],
-        metrics: [{ name: "totalRevenue" }]
+        dateRanges: [{ startDate: "30daysAgo", endDate: "today" }],
+        metrics: [{ name: "activeUsers" }, { name: "sessions" }]
       });
 
-      const [sevenDayReport] = await client.runReport({
-        property: `properties/${propertyId}`,
-        dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
-        metrics: [
-          { name: "activeUsers" },
-          { name: "sessions" },
-          { name: "totalRevenue" }
-        ]
-      });
-
-      const revenueYesterday = Number(
-        yesterdayReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
-      );
-
-      const activeUsers = Number(
-        sevenDayReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
-      );
-
-      const sessions = Number(
-        sevenDayReport.rows?.[0]?.metricValues?.[1]?.value ?? 0
-      );
+      const activeUsers = Number(report.rows?.[0]?.metricValues?.[0]?.value ?? 0);
+      const sessions = Number(report.rows?.[0]?.metricValues?.[1]?.value ?? 0);
 
       const result = {
         kpiGroups: [
@@ -109,19 +90,19 @@ class RealGa4Provider implements Ga4Provider {
               {
                 id: "ga4-active-users",
                 label: "Active Users",
-                value: activeUsers.toLocaleString(),
+                value: activeUsers > 0 ? activeUsers.toLocaleString() : "-",
                 change: undefined
               },
               {
                 id: "ga4-sessions",
                 label: "Sessions",
-                value: sessions.toLocaleString(),
+                value: sessions > 0 ? sessions.toLocaleString() : "-",
                 change: undefined
               },
               {
                 id: "ga4-revenue",
                 label: "Revenue",
-                value: `£${Math.round(revenueYesterday).toLocaleString()}`,
+                value: "-",
                 change: undefined
               }
             ]
