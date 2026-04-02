@@ -2,56 +2,117 @@ import "server-only";
 
 import { BetaAnalyticsDataClient } from "@google-analytics/data";
 
-const propertyId = process.env.GA4_PROPERTY_ID;
-const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+import type { Ga4Data } from "@/types/integrations";
 
-function getClient() {
-  if (!propertyId) {
-    throw new Error("Missing GA4_PROPERTY_ID");
-  }
+export interface Ga4Provider {
+  getDashboardData(): Promise<Ga4Data>;
+}
 
-  if (!clientEmail) {
-    throw new Error("Missing GOOGLE_CLIENT_EMAIL");
-  }
+class RealGa4Provider implements Ga4Provider {
+  private getClient() {
+    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+    const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
 
-  if (!privateKey) {
-    throw new Error("Missing GOOGLE_PRIVATE_KEY");
-  }
-
-  return new BetaAnalyticsDataClient({
-    credentials: {
-      client_email: clientEmail,
-      private_key: privateKey
+    if (!clientEmail) {
+      throw new Error("Missing GOOGLE_CLIENT_EMAIL");
     }
-  });
+
+    if (!privateKey) {
+      throw new Error("Missing GOOGLE_PRIVATE_KEY");
+    }
+
+    return new BetaAnalyticsDataClient({
+      credentials: {
+        client_email: clientEmail,
+        private_key: privateKey
+      }
+    });
+  }
+
+  async getDashboardData(): Promise<Ga4Data> {
+    const propertyId = process.env.GA4_PROPERTY_ID;
+
+    if (!propertyId) {
+      throw new Error("Missing GA4_PROPERTY_ID");
+    }
+
+    const client = this.getClient();
+
+    const [yesterdayReport] = await client.runReport({
+      property: `properties/${propertyId}`,
+      dateRanges: [{ startDate: "yesterday", endDate: "yesterday" }],
+      metrics: [{ name: "totalRevenue" }]
+    });
+
+    const [sevenDayReport] = await client.runReport({
+      property: `properties/${propertyId}`,
+      dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
+      metrics: [
+        { name: "activeUsers" },
+        { name: "sessions" },
+        { name: "totalRevenue" }
+      ]
+    });
+
+    const revenueYesterday = Number(
+      yesterdayReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
+    );
+
+    const activeUsers = Number(
+      sevenDayReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
+    );
+
+    const sessions = Number(
+      sevenDayReport.rows?.[0]?.metricValues?.[1]?.value ?? 0
+    );
+
+    const totalRevenue = Number(
+      sevenDayReport.rows?.[0]?.metricValues?.[2]?.value ?? 0
+    );
+
+    return {
+      kpiGroups: [
+        {
+          id: "ga4-overview",
+          label: "GA4 Overview",
+          title: "GA4 Overview",
+          metrics: [
+            {
+              id: "ga4-active-users",
+              label: "Active Users",
+              value: activeUsers.toLocaleString(),
+              change: null
+            },
+            {
+              id: "ga4-sessions",
+              label: "Sessions",
+              value: sessions.toLocaleString(),
+              change: null
+            },
+            {
+              id: "ga4-revenue",
+              label: "Revenue",
+              value: `£${Math.round(revenueYesterday).toLocaleString()}`,
+              change: null
+            }
+          ]
+        }
+      ],
+      charts: [],
+      tables: [],
+      activeUsers,
+      sessions,
+      totalRevenue
+    } as unknown as Ga4Data;
+  }
 }
 
-function getMetricValue(
-  row: { metricValues?: Array<{ value?: string | null }> | null } | null | undefined,
-  index: number
-) {
-  return Number(row?.metricValues?.[index]?.value ?? 0);
+export class Ga4Service {
+  constructor(private readonly provider: Ga4Provider) {}
+
+  async getDashboardData() {
+    return this.provider.getDashboardData();
+  }
 }
 
-export async function getGA4Overview() {
-  const client = getClient();
-
-  const [response] = await client.runReport({
-    property: `properties/${propertyId}`,
-    dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
-    metrics: [
-      { name: "activeUsers" },
-      { name: "sessions" },
-      { name: "totalRevenue" }
-    ]
-  });
-
-  const row = response.rows?.[0];
-
-  return {
-    activeUsers: getMetricValue(row, 0),
-    sessions: getMetricValue(row, 1),
-    totalRevenue: getMetricValue(row, 2)
-  };
-}
+export const ga4Service = new Ga4Service(new RealGa4Provider());
