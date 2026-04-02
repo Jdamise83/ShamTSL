@@ -40,14 +40,13 @@ export function SidebarNav({ role }: { role: SidebarRole }) {
   const navigation = allNavigation.filter((item) => item.roles.includes(role));
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-72 border-r border-border/80 bg-card px-5 py-8 lg:block">
+    <aside className="sticky top-0 hidden h-screen w-72 border-r border-white/15 bg-[#1f4f8f] px-5 py-8 text-white lg:block">
       <div className="mb-10 px-2">
         <img
           src="https://cdn.shopify.com/s/files/1/0991/4689/1610/files/new_thesnuslife_logotype.svg?v=1775047239"
           alt="The Snus Life"
-          className="h-14 w-auto"
+          className="h-20 w-auto"
         />
-        <p className="mt-2 text-sm text-muted-foreground">The Snus Life Takeover</p>
       </div>
 
       <nav className="space-y-1.5">
@@ -62,8 +61,8 @@ export function SidebarNav({ role }: { role: SidebarRole }) {
               className={cn(
                 "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors",
                 active
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                  ? "bg-white/20 text-white"
+                  : "text-white/90 hover:bg-white/15 hover:text-white"
               )}
             >
               <Icon className="h-4 w-4" />

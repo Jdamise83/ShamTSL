@@ -47,9 +47,14 @@ export default async function ProtectedLayout({
       <SidebarNav role={role} />
       <div className="flex-1">
         <MobileNav />
-        <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-8 lg:px-10">
-          <TopBar userEmail={user.email ?? "admin"} onSignOut={signOutAction} />
-          {children}
+        <main className="relative mx-auto max-w-[1600px] px-4 py-6 sm:px-8 lg:px-10">
+          <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden rounded-3xl">
+            <div className="tsl-page-watermark" />
+          </div>
+          <div className="relative z-10">
+            <TopBar userEmail={user.email ?? "admin"} onSignOut={signOutAction} />
+            {children}
+          </div>
         </main>
       </div>
     </div>

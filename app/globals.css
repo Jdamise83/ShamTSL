@@ -32,6 +32,23 @@ body {
   @apply bg-background text-foreground font-sans antialiased;
 }
 
+.tsl-page-watermark {
+  height: 100%;
+  width: 100%;
+  background-image: url("https://cdn.shopify.com/s/files/1/0991/4689/1610/files/Pablo_silver_mobile_hero.webp?v=1774552995");
+  background-repeat: no-repeat;
+  background-position: center top;
+  background-size: clamp(520px, 92%, 1280px) auto;
+  opacity: 0.2;
+}
+
+@media (max-width: 768px) {
+  .tsl-page-watermark {
+    background-size: clamp(340px, 96%, 760px) auto;
+    background-position: center 1rem;
+  }
+}
+
 .fc .fc-toolbar-title {
   @apply text-xl font-heading uppercase tracking-wide text-foreground;
 }

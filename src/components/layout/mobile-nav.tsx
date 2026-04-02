@@ -20,7 +20,7 @@ export function MobileNav() {
   const pathname = usePathname();
 
   return (
-    <div className="overflow-x-auto border-b border-border bg-card px-4 py-3 lg:hidden">
+    <div className="overflow-x-auto border-b border-white/15 bg-[#1f4f8f] px-4 py-3 lg:hidden">
       <div className="flex min-w-max gap-2">
         {links.map((link) => (
           <Link
@@ -29,8 +29,8 @@ export function MobileNav() {
             className={cn(
               "rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide",
               pathname === link.href || pathname.startsWith(`${link.href}/`)
-                ? "bg-accent text-accent-foreground"
-                : "bg-muted text-muted-foreground"
+                ? "bg-white/20 text-white"
+                : "bg-white/10 text-white/90"
             )}
           >
             {link.label}
