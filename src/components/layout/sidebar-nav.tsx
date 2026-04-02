@@ -32,10 +32,15 @@ export function SidebarNav() {
   return (
     <aside className="sticky top-0 hidden h-screen w-72 border-r border-border/80 bg-card px-5 py-8 lg:block">
       <div className="mb-10 px-2">
-        <p className="font-heading text-2xl font-bold uppercase tracking-[0.12em] text-foreground">
-          The Snus Life
+        <img
+          src="https://cdn.shopify.com/s/files/1/0991/4689/1610/files/new_thesnuslife_logotype.svg?v=1775047239"
+          alt="The Snus Life"
+          className="h-10 w-auto"
+        />
+
+        <p className="mt-2 text-sm text-muted-foreground">
+          The Snus Life Takeover
         </p>
-        <p className="mt-2 text-sm text-muted-foreground">Private Operations Console</p>
       </div>
 
       <nav className="space-y-1.5">
