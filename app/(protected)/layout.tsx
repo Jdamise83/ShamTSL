@@ -34,9 +34,17 @@ export default async function ProtectedLayout({
     redirect("/login");
   }
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const role = profile?.role === "staff" ? "staff" : "admin";
+
   return (
     <div className="min-h-screen lg:flex">
-      <SidebarNav />
+      <SidebarNav role={role} />
       <div className="flex-1">
         <MobileNav />
         <main className="mx-auto max-w-[1600px] px-4 py-6 sm:px-8 lg:px-10">

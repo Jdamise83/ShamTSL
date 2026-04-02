@@ -15,19 +15,22 @@ import {
 
 import { cn } from "@/lib/utils";
 
-const navigation = [
-  { href: "/home", label: "Home", icon: Home },
-  { href: "/calendar", label: "Calendar", icon: Calendar },
-  { href: "/holidays", label: "Holidays", icon: Umbrella },
-  { href: "/google-ads", label: "Google Ads", icon: Megaphone },
-  { href: "/seo", label: "SEO", icon: Search },
-  { href: "/ga4", label: "GA4", icon: ChartColumn },
-  { href: "/unleashed", label: "Unleashed", icon: Factory },
-  { href: "/settings", label: "Settings", icon: Cog }
-];
+type SidebarRole = "admin" | "staff";
 
-export function SidebarNav() {
+const allNavigation = [
+  { href: "/home", label: "Home", icon: Home, roles: ["admin"] },
+  { href: "/calendar", label: "Calendar", icon: Calendar, roles: ["admin"] },
+  { href: "/holidays", label: "Holidays", icon: Umbrella, roles: ["admin", "staff"] },
+  { href: "/google-ads", label: "Google Ads", icon: Megaphone, roles: ["admin"] },
+  { href: "/seo", label: "SEO", icon: Search, roles: ["admin"] },
+  { href: "/ga4", label: "GA4", icon: ChartColumn, roles: ["admin"] },
+  { href: "/unleashed", label: "Unleashed", icon: Factory, roles: ["admin"] },
+  { href: "/settings", label: "Settings", icon: Cog, roles: ["admin"] }
+] as const;
+
+export function SidebarNav({ role }: { role: SidebarRole }) {
   const pathname = usePathname();
+  const navigation = allNavigation.filter((item) => item.roles.includes(role));
 
   return (
     <aside className="sticky top-0 hidden h-screen w-72 border-r border-border/80 bg-card px-5 py-8 lg:block">
@@ -37,10 +40,7 @@ export function SidebarNav() {
           alt="The Snus Life"
           className="h-14 w-auto"
         />
-
-        <p className="mt-2 text-sm text-muted-foreground">
-          The Snus Life Takeover
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">The Snus Life Takeover</p>
       </div>
 
       <nav className="space-y-1.5">
