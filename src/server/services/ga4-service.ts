@@ -38,34 +38,40 @@ class RealGa4Provider implements Ga4Provider {
           metrics: [
             {
               id: "ga4-users",
-              label: "Active Users",
+              label: "Active Users (Last 30 Days)",
               value: "-",
               change: undefined
             },
             {
               id: "ga4-sessions",
-              label: "Sessions",
+              label: "Sessions (Last 30 Days)",
               value: "-",
               change: undefined
             },
             {
               id: "ga4-revenue",
-              label: "Revenue",
+              label: "Revenue (Last 30 Days)",
               value: "-",
               change: undefined
             }
           ]
         }
       ],
-      charts: [
-        {
-          id: "ga4-trend",
-          label: "Trend",
-          trend: []
-        }
-      ],
+      charts: {
+        trend: [
+          { label: "Jan", value: 0 },
+          { label: "Feb", value: 0 },
+          { label: "Mar", value: 0 }
+        ],
+        split: [
+          { label: "Google Ads", value: 0 },
+          { label: "Organic Search", value: 0 },
+          { label: "Direct", value: 0 },
+          { label: "Referral", value: 0 }
+        ]
+      },
       tables: []
-    } as unknown as Ga4Data;
+    };
   }
 
   async getDashboardData(): Promise<Ga4Data> {
@@ -78,7 +84,7 @@ class RealGa4Provider implements Ga4Provider {
 
       const client = this.getClient();
 
-      const [report] = await client.runReport({
+      const [overviewReport] = await client.runReport({
         property: `properties/${propertyId}`,
         dateRanges: [{ startDate: "30daysAgo", endDate: "today" }],
         metrics: [
@@ -88,9 +94,99 @@ class RealGa4Provider implements Ga4Provider {
         ]
       });
 
-      const activeUsers = Number(report.rows?.[0]?.metricValues?.[0]?.value ?? 0);
-      const sessions = Number(report.rows?.[0]?.metricValues?.[1]?.value ?? 0);
-      const revenue = Number(report.rows?.[0]?.metricValues?.[2]?.value ?? 0);
+      const [monthlyTrendReport] = await client.runReport({
+        property: `properties/${propertyId}`,
+        dateRanges: [{ startDate: "2026-01-01", endDate: "today" }],
+        dimensions: [{ name: "month" }],
+        metrics: [{ name: "sessions" }],
+        orderBys: [
+          {
+            dimension: {
+              dimensionName: "month"
+            }
+          }
+        ]
+      });
+
+      const [acquisitionReport] = await client.runReport({
+        property: `properties/${propertyId}`,
+        dateRanges: [{ startDate: "30daysAgo", endDate: "today" }],
+        dimensions: [{ name: "sessionDefaultChannelGroup" }],
+        metrics: [{ name: "sessions" }],
+        limit: 10
+      });
+
+      const activeUsers = Number(
+        overviewReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
+      );
+
+      const sessions = Number(
+        overviewReport.rows?.[0]?.metricValues?.[1]?.value ?? 0
+      );
+
+      const revenue = Number(
+        overviewReport.rows?.[0]?.metricValues?.[2]?.value ?? 0
+      );
+
+      const monthMap: Record<string, number> = {
+        "01": 0,
+        "02": 0,
+        "03": 0
+      };
+
+      for (const row of monthlyTrendReport.rows ?? []) {
+        const month = row.dimensionValues?.[0]?.value ?? "";
+        const value = Number(row.metricValues?.[0]?.value ?? 0);
+
+        if (month in monthMap) {
+          monthMap[month] = value;
+        }
+      }
+
+      const trend = [
+        { label: "Jan", value: monthMap["01"] ?? 0 },
+        { label: "Feb", value: monthMap["02"] ?? 0 },
+        { label: "Mar", value: monthMap["03"] ?? 0 }
+      ];
+
+      const wantedChannels = [
+        "Paid Search",
+        "Organic Search",
+        "Direct",
+        "Referral"
+      ];
+
+      const splitMap: Record<string, number> = {
+        "Google Ads": 0,
+        "Organic Search": 0,
+        "Direct": 0,
+        "Referral": 0
+      };
+
+      for (const row of acquisitionReport.rows ?? []) {
+        const channel = row.dimensionValues?.[0]?.value ?? "";
+        const value = Number(row.metricValues?.[0]?.value ?? 0);
+
+        if (!wantedChannels.includes(channel)) {
+          continue;
+        }
+
+        if (channel === "Paid Search") {
+          splitMap["Google Ads"] += value;
+        }
+
+        if (channel === "Organic Search") {
+          splitMap["Organic Search"] += value;
+        }
+
+        if (channel === "Direct") {
+          splitMap["Direct"] += value;
+        }
+
+        if (channel === "Referral") {
+          splitMap["Referral"] += value;
+        }
+      }
 
       return {
         kpiGroups: [
@@ -100,34 +196,36 @@ class RealGa4Provider implements Ga4Provider {
             metrics: [
               {
                 id: "ga4-users",
-                label: "Active Users",
-                value: activeUsers > 0 ? activeUsers.toLocaleString() : "-",
+                label: "Active Users (Last 30 Days)",
+                value: activeUsers.toLocaleString(),
                 change: undefined
               },
               {
                 id: "ga4-sessions",
-                label: "Sessions",
-                value: sessions > 0 ? sessions.toLocaleString() : "-",
+                label: "Sessions (Last 30 Days)",
+                value: sessions.toLocaleString(),
                 change: undefined
               },
               {
                 id: "ga4-revenue",
-                label: "Revenue",
+                label: "Revenue (Last 30 Days)",
                 value: `£${Math.round(revenue).toLocaleString()}`,
                 change: undefined
               }
             ]
           }
         ],
-        charts: [
-          {
-            id: "ga4-trend",
-            label: "Trend",
-            trend: []
-          }
-        ],
+        charts: {
+          trend,
+          split: [
+            { label: "Google Ads", value: splitMap["Google Ads"] },
+            { label: "Organic Search", value: splitMap["Organic Search"] },
+            { label: "Direct", value: splitMap["Direct"] },
+            { label: "Referral", value: splitMap["Referral"] }
+          ]
+        },
         tables: []
-      } as unknown as Ga4Data;
+      };
     } catch (error) {
       console.error("GA4 runtime error:", error);
       return this.fallback();

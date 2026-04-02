@@ -7,10 +7,10 @@ export default async function Ga4Page() {
   return (
     <PerformanceModuleView
       title="GA4"
-      description="Sessions, users, revenue and purchases with channel and conversion context."
+      description="Last 30 days of users, sessions, revenue, monthly performance trend, and acquisition source mix."
       data={data}
       valuePrefix=""
-      splitTitle="Device Split"
+      splitTitle="Acquisition Split"
     />
   );
 }
