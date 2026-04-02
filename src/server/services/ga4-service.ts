@@ -36,9 +36,24 @@ class RealGa4Provider implements Ga4Provider {
           id: "ga4-overview",
           label: "GA4 Overview",
           metrics: [
-            { id: "users", label: "Active Users", value: "-", change: undefined },
-            { id: "sessions", label: "Sessions", value: "-", change: undefined },
-            { id: "revenue", label: "Revenue", value: "-", change: undefined }
+            {
+              id: "ga4-users",
+              label: "Active Users",
+              value: "-",
+              change: undefined
+            },
+            {
+              id: "ga4-sessions",
+              label: "Sessions",
+              value: "-",
+              change: undefined
+            },
+            {
+              id: "ga4-revenue",
+              label: "Revenue",
+              value: "-",
+              change: undefined
+            }
           ]
         }
       ],
@@ -61,31 +76,21 @@ class RealGa4Provider implements Ga4Provider {
         throw new Error("Missing GA4_PROPERTY_ID");
       }
 
-      console.log("GA4 DEBUG → Property ID:", propertyId);
-
       const client = this.getClient();
 
-      // TEST CALL FIRST (this is key)
-      const [test] = await client.runReport({
+      const [report] = await client.runReport({
         property: `properties/${propertyId}`,
-        dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
-        metrics: [{ name: "activeUsers" }]
+        dateRanges: [{ startDate: "30daysAgo", endDate: "today" }],
+        metrics: [
+          { name: "activeUsers" },
+          { name: "sessions" },
+          { name: "totalRevenue" }
+        ]
       });
 
-      console.log("GA4 DEBUG → Raw response:", JSON.stringify(test, null, 2));
-
-      const activeUsers = Number(
-        test.rows?.[0]?.metricValues?.[0]?.value ?? 0
-      );
-
-      const sessions = 0;
-      const revenue = 0;
-
-      console.log("GA4 DEBUG → Parsed:", {
-        activeUsers,
-        sessions,
-        revenue
-      });
+      const activeUsers = Number(report.rows?.[0]?.metricValues?.[0]?.value ?? 0);
+      const sessions = Number(report.rows?.[0]?.metricValues?.[1]?.value ?? 0);
+      const revenue = Number(report.rows?.[0]?.metricValues?.[2]?.value ?? 0);
 
       return {
         kpiGroups: [
@@ -96,19 +101,19 @@ class RealGa4Provider implements Ga4Provider {
               {
                 id: "ga4-users",
                 label: "Active Users",
-                value: activeUsers.toLocaleString(),
+                value: activeUsers > 0 ? activeUsers.toLocaleString() : "-",
                 change: undefined
               },
               {
                 id: "ga4-sessions",
                 label: "Sessions",
-                value: sessions.toLocaleString(),
+                value: sessions > 0 ? sessions.toLocaleString() : "-",
                 change: undefined
               },
               {
                 id: "ga4-revenue",
                 label: "Revenue",
-                value: `£${revenue.toLocaleString()}`,
+                value: `£${Math.round(revenue).toLocaleString()}`,
                 change: undefined
               }
             ]
@@ -123,12 +128,8 @@ class RealGa4Provider implements Ga4Provider {
         ],
         tables: []
       } as unknown as Ga4Data;
-
     } catch (error) {
-      console.error(
-        "GA4 ERROR FULL:",
-        JSON.stringify(error, Object.getOwnPropertyNames(error), 2)
-      );
+      console.error("GA4 runtime error:", error);
       return this.fallback();
     }
   }
