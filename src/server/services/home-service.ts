@@ -25,29 +25,40 @@ export const homeService = {
         { id: "mtd", label: "MTD", value: "£672,400", change: { value: 7.4, direction: "up" as const } },
         { id: "ytd", label: "YTD", value: "£7.4M", change: { value: 11.2, direction: "up" as const } }
       ],
+
       upcomingMeetings: meetings,
+
       holidaySummary: holiday.summary,
+
       moduleSnapshots: [
         {
           id: "google-ads",
           label: "Google Ads",
-          value: ads.kpiGroups[0]?.metrics.find((metric) => metric.id.includes("roas"))?.value ?? "-",
+          value:
+            ads.kpiGroups[0]?.metrics.find((metric) => metric.id.includes("roas"))?.value ?? "-",
           helper: "Today ROAS"
         },
+
         {
           id: "seo",
           label: "SEO",
           value: seo.kpiGroups[0]?.metrics[0]?.value ?? "-",
           helper: "Last 7D Clicks"
         },
-       {
-  id: "ga4",
-  label: "GA4",
-  value: (ga4 as any).activeUsers?.toLocaleString() ?? "-",
-  helper: `${(ga4 as any).sessions?.toLocaleString() ?? "-"} sessions | £${Math.round(
-    (ga4 as any).totalRevenue ?? 0
-  ).toLocaleString()} revenue`
-},
+
+        {
+          id: "ga4",
+          label: "GA4",
+          value:
+            ga4.kpiGroups[0]?.metrics.find((metric) => metric.id === "ga4-active-users")?.value ??
+            "-",
+          helper: `${
+            ga4.kpiGroups[0]?.metrics.find((metric) => metric.id === "ga4-sessions")?.value ?? "-"
+          } sessions | ${
+            ga4.kpiGroups[0]?.metrics.find((metric) => metric.id === "ga4-revenue")?.value ?? "-"
+          }`
+        },
+
         {
           id: "unleashed",
           label: "Unleashed",

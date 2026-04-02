@@ -66,15 +66,11 @@ class RealGa4Provider implements Ga4Provider {
       sevenDayReport.rows?.[0]?.metricValues?.[1]?.value ?? 0
     );
 
-    const totalRevenue = Number(
-      sevenDayReport.rows?.[0]?.metricValues?.[2]?.value ?? 0
-    );
-
     return {
       kpiGroups: [
         {
           id: "ga4-overview",
-          title: "GA4 Overview",
+          label: "GA4 Overview",
           metrics: [
             {
               id: "ga4-active-users",
@@ -98,14 +94,7 @@ class RealGa4Provider implements Ga4Provider {
         }
       ],
       charts: [],
-      tables: [],
-      activeUsers,
-      sessions,
-      totalRevenue
-    } as Ga4Data & {
-      activeUsers: number;
-      sessions: number;
-      totalRevenue: number;
+      tables: []
     };
   }
 }
