@@ -7,10 +7,10 @@ export default async function Ga4Page() {
   return (
     <PerformanceModuleView
       title="GA4"
-      description="Last 30 days of users, sessions, revenue, monthly performance trend, and acquisition source mix."
+      description="Last 30 days of users, sessions, revenue, monthly performance trend, and acquisition mix."
       data={data}
       valuePrefix=""
-      splitTitle="Acquisition Split"
+      splitTitle="Acquisition Split (Last 30 Days)"
     />
   );
 }

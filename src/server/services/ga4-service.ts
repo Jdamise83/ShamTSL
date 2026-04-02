@@ -113,7 +113,7 @@ class RealGa4Provider implements Ga4Provider {
         dateRanges: [{ startDate: "30daysAgo", endDate: "today" }],
         dimensions: [{ name: "sessionDefaultChannelGroup" }],
         metrics: [{ name: "sessions" }],
-        limit: 10
+        limit: 20
       });
 
       const activeUsers = Number(
@@ -149,14 +149,7 @@ class RealGa4Provider implements Ga4Provider {
         { label: "Mar", value: monthMap["03"] ?? 0 }
       ];
 
-      const wantedChannels = [
-        "Paid Search",
-        "Organic Search",
-        "Direct",
-        "Referral"
-      ];
-
-      const splitMap: Record<string, number> = {
+      const splitCounts: Record<string, number> = {
         "Google Ads": 0,
         "Organic Search": 0,
         "Direct": 0,
@@ -167,26 +160,26 @@ class RealGa4Provider implements Ga4Provider {
         const channel = row.dimensionValues?.[0]?.value ?? "";
         const value = Number(row.metricValues?.[0]?.value ?? 0);
 
-        if (!wantedChannels.includes(channel)) {
-          continue;
-        }
-
         if (channel === "Paid Search") {
-          splitMap["Google Ads"] += value;
-        }
-
-        if (channel === "Organic Search") {
-          splitMap["Organic Search"] += value;
-        }
-
-        if (channel === "Direct") {
-          splitMap["Direct"] += value;
-        }
-
-        if (channel === "Referral") {
-          splitMap["Referral"] += value;
+          splitCounts["Google Ads"] += value;
+        } else if (channel === "Organic Search") {
+          splitCounts["Organic Search"] += value;
+        } else if (channel === "Direct") {
+          splitCounts["Direct"] += value;
+        } else if (channel === "Referral") {
+          splitCounts["Referral"] += value;
         }
       }
+
+      const totalSplitSessions = Object.values(splitCounts).reduce((sum, value) => sum + value, 0);
+
+      const toPercent = (value: number) => {
+        if (totalSplitSessions === 0) {
+          return 0;
+        }
+
+        return Math.round((value / totalSplitSessions) * 100);
+      };
 
       return {
         kpiGroups: [
@@ -218,10 +211,10 @@ class RealGa4Provider implements Ga4Provider {
         charts: {
           trend,
           split: [
-            { label: "Google Ads", value: splitMap["Google Ads"] },
-            { label: "Organic Search", value: splitMap["Organic Search"] },
-            { label: "Direct", value: splitMap["Direct"] },
-            { label: "Referral", value: splitMap["Referral"] }
+            { label: "Google Ads", value: toPercent(splitCounts["Google Ads"]) },
+            { label: "Organic Search", value: toPercent(splitCounts["Organic Search"]) },
+            { label: "Direct", value: toPercent(splitCounts["Direct"]) },
+            { label: "Referral", value: toPercent(splitCounts["Referral"]) }
           ]
         },
         tables: []
