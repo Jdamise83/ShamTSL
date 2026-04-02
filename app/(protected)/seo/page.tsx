@@ -1,6 +1,8 @@
 import { PerformanceModuleView } from "@/components/dashboard/performance-module-view";
 import { seoService } from "@/server/services";
 
+export const dynamic = "force-dynamic";
+
 export default async function SeoPage() {
   const data = await seoService.getDashboardData();
 
