@@ -3,6 +3,14 @@ import { GoogleAdsApi } from "google-ads-api";
 
 import type { GoogleAdsData } from "@/types/integrations";
 
+type Totals = {
+  cost: number;
+  clicks: number;
+  impressions: number;
+  conversions: number;
+  revenue: number;
+};
+
 export class GoogleAdsService {
   private getClient() {
     return new GoogleAdsApi({
@@ -17,7 +25,8 @@ export class GoogleAdsService {
 
     return client.Customer({
       customer_id: process.env.GOOGLE_ADS_CUSTOMER_ID!,
-      refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN!
+      refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN!,
+      login_customer_id: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID!
     });
   }
 
@@ -37,13 +46,16 @@ export class GoogleAdsService {
           WHERE segments.date DURING ${dateRange}
         `);
 
-        const totals = res.reduce(
+        const totals = res.reduce<Totals>(
           (acc, row) => {
-            acc.cost += Number(row.metrics.cost_micros || 0);
-            acc.clicks += Number(row.metrics.clicks || 0);
-            acc.impressions += Number(row.metrics.impressions || 0);
-            acc.conversions += Number(row.metrics.conversions || 0);
-            acc.revenue += Number(row.metrics.conversions_value || 0);
+            const metrics = row.metrics;
+
+            acc.cost += Number(metrics?.cost_micros ?? 0);
+            acc.clicks += Number(metrics?.clicks ?? 0);
+            acc.impressions += Number(metrics?.impressions ?? 0);
+            acc.conversions += Number(metrics?.conversions ?? 0);
+            acc.revenue += Number(metrics?.conversions_value ?? 0);
+
             return acc;
           },
           { cost: 0, clicks: 0, impressions: 0, conversions: 0, revenue: 0 }
