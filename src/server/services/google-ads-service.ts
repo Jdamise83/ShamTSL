@@ -13,21 +13,132 @@ type Totals = {
 
 export class GoogleAdsService {
   private getClient() {
+    const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET;
+    const developerToken = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
+
+    if (!clientId) {
+      throw new Error("Missing GOOGLE_ADS_CLIENT_ID");
+    }
+
+    if (!clientSecret) {
+      throw new Error("Missing GOOGLE_ADS_CLIENT_SECRET");
+    }
+
+    if (!developerToken) {
+      throw new Error("Missing GOOGLE_ADS_DEVELOPER_TOKEN");
+    }
+
     return new GoogleAdsApi({
-      client_id: process.env.GOOGLE_ADS_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET!,
-      developer_token: process.env.GOOGLE_ADS_DEVELOPER_TOKEN!
+      client_id: clientId,
+      client_secret: clientSecret,
+      developer_token: developerToken
     });
   }
 
   private getCustomer() {
+    const customerId = process.env.GOOGLE_ADS_CUSTOMER_ID;
+    const refreshToken = process.env.GOOGLE_ADS_REFRESH_TOKEN;
+    const loginCustomerId = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
+
+    if (!customerId) {
+      throw new Error("Missing GOOGLE_ADS_CUSTOMER_ID");
+    }
+
+    if (!refreshToken) {
+      throw new Error("Missing GOOGLE_ADS_REFRESH_TOKEN");
+    }
+
+    if (!loginCustomerId) {
+      throw new Error("Missing GOOGLE_ADS_LOGIN_CUSTOMER_ID");
+    }
+
     const client = this.getClient();
 
     return client.Customer({
-      customer_id: process.env.GOOGLE_ADS_CUSTOMER_ID!,
-      refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN!,
-      login_customer_id: process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID!
+      customer_id: customerId,
+      refresh_token: refreshToken,
+      login_customer_id: loginCustomerId
     });
+  }
+
+  private fallback(): GoogleAdsData {
+    return {
+      kpiGroups: [
+        {
+          id: "google-ads-overview",
+          label: "Google Ads Overview",
+          metrics: [
+            {
+              id: "ads-spend",
+              label: "Spend",
+              value: "-",
+              change: undefined
+            },
+            {
+              id: "ads-clicks",
+              label: "Clicks",
+              value: "-",
+              change: undefined
+            },
+            {
+              id: "ads-roas",
+              label: "ROAS",
+              value: "-",
+              change: undefined
+            }
+          ]
+        }
+      ],
+      charts: {
+        trend: [],
+        split: []
+      },
+      tables: [
+        {
+          key: "ads-performance",
+          title: "Google Ads Performance",
+          rows: [
+            {
+              Period: "Today",
+              Spend: "-",
+              Clicks: "-",
+              Impressions: "-",
+              Conversions: "-",
+              Revenue: "-",
+              ROAS: "-"
+            },
+            {
+              Period: "Yesterday",
+              Spend: "-",
+              Clicks: "-",
+              Impressions: "-",
+              Conversions: "-",
+              Revenue: "-",
+              ROAS: "-"
+            },
+            {
+              Period: "Last 7 days",
+              Spend: "-",
+              Clicks: "-",
+              Impressions: "-",
+              Conversions: "-",
+              Revenue: "-",
+              ROAS: "-"
+            },
+            {
+              Period: "Month to date",
+              Spend: "-",
+              Clicks: "-",
+              Impressions: "-",
+              Conversions: "-",
+              Revenue: "-",
+              ROAS: "-"
+            }
+          ]
+        }
+      ]
+    };
   }
 
   async getDashboardData(): Promise<GoogleAdsData> {
@@ -82,8 +193,35 @@ export class GoogleAdsService {
         getRange("THIS_MONTH", "Month to date")
       ]);
 
+      const monthToDate = data.find((row) => row.period === "Month to date");
+
       return {
-        kpiGroups: [],
+        kpiGroups: [
+          {
+            id: "google-ads-overview",
+            label: "Google Ads Overview",
+            metrics: [
+              {
+                id: "ads-spend",
+                label: "Spend (Month to date)",
+                value: `£${(monthToDate?.spend ?? 0).toFixed(2)}`,
+                change: undefined
+              },
+              {
+                id: "ads-clicks",
+                label: "Clicks (Month to date)",
+                value: `${monthToDate?.clicks ?? 0}`,
+                change: undefined
+              },
+              {
+                id: "ads-roas",
+                label: "ROAS (Month to date)",
+                value: `${(monthToDate?.roas ?? 0).toFixed(2)}x`,
+                change: undefined
+              }
+            ]
+          }
+        ],
         charts: {
           trend: [],
           split: []
@@ -106,7 +244,7 @@ export class GoogleAdsService {
       };
     } catch (error) {
       console.error("GOOGLE ADS ERROR:", error);
-      throw error;
+      return this.fallback();
     }
   }
 }
