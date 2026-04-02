@@ -345,19 +345,7 @@ export class GoogleAdsService {
       });
   }
 
-  private isBrandedCampaign(name: string) {
-    const normalized = name.toLowerCase();
-
-    const nonBrandedHints = ["non-brand", "non brand", "generic", "prospecting", "competitor"];
-    if (nonBrandedHints.some((hint) => normalized.includes(hint))) {
-      return false;
-    }
-
-    const brandedHints = ["brand", "branded", "tsl", "snus life", "thesnuslife"];
-    return brandedHints.some((hint) => normalized.includes(hint));
-  }
-
-  private async getBrandedSplitData(
+  private async getTopSellingProductsSplitData(
     config: AdsConfig,
     accessToken: string,
     includeLoginCustomerId: boolean
@@ -367,44 +355,61 @@ export class GoogleAdsService {
       accessToken,
       `
       SELECT
-        campaign.name,
-        metrics.cost_micros
-      FROM campaign
-      WHERE segments.date DURING LAST_7_DAYS
+        segments.product_title,
+        metrics.conversions_value
+      FROM shopping_performance_view
+      WHERE segments.date DURING LAST_30_DAYS
       `,
       includeLoginCustomerId
     );
 
-    let brandedCost = 0;
-    let nonBrandedCost = 0;
+    const revenueByProduct = new Map<string, number>();
 
     for (const row of rows) {
-      const campaignName = this.readString(row.campaign?.name);
-      const cost = this.readMetric(row.metrics, ["costMicros", "cost_micros"]);
+      const productTitle = this.readString(
+        row.segments?.["productTitle"] ??
+          row.segments?.["product_title"] ??
+          row.segments?.["productItemId"] ??
+          row.segments?.["product_item_id"]
+      );
+      const revenue = this.readMetric(row.metrics, ["conversionsValue", "conversions_value"]);
 
-      if (cost <= 0) {
+      if (!productTitle || revenue <= 0) {
         continue;
       }
 
-      if (this.isBrandedCampaign(campaignName)) {
-        brandedCost += cost;
-      } else {
-        nonBrandedCost += cost;
-      }
+      revenueByProduct.set(productTitle, (revenueByProduct.get(productTitle) ?? 0) + revenue);
     }
 
-    const total = brandedCost + nonBrandedCost;
-    if (total <= 0) {
+    const sortedProducts = Array.from(revenueByProduct.entries()).sort((a, b) => b[1] - a[1]);
+    if (!sortedProducts.length) {
       return [];
     }
 
-    const brandedPercent = Math.round((brandedCost / total) * 100);
-    const nonBrandedPercent = Math.max(0, 100 - brandedPercent);
+    const totalRevenue = sortedProducts.reduce((sum, [, revenue]) => sum + revenue, 0);
+    if (totalRevenue <= 0) {
+      return [];
+    }
 
-    return [
-      { label: "Branded", value: brandedPercent },
-      { label: "Non-Branded", value: nonBrandedPercent }
-    ];
+    const topProducts = sortedProducts.slice(0, 4);
+    const split = topProducts.map(([name, revenue]) => ({
+      label: name.length > 32 ? `${name.slice(0, 29)}...` : name,
+      value: Math.round((revenue / totalRevenue) * 100)
+    }));
+
+    const topRevenue = topProducts.reduce((sum, [, revenue]) => sum + revenue, 0);
+    const otherRevenue = totalRevenue - topRevenue;
+    if (otherRevenue > 0) {
+      split.push({ label: "Other", value: Math.max(1, Math.round((otherRevenue / totalRevenue) * 100)) });
+    }
+
+    const splitTotal = split.reduce((sum, item) => sum + item.value, 0);
+    if (splitTotal > 100 && split.length) {
+      const overflow = splitTotal - 100;
+      split[split.length - 1].value = Math.max(0, split[split.length - 1].value - overflow);
+    }
+
+    return split.filter((item) => item.value > 0);
   }
 
   private async getRange(
@@ -563,13 +568,15 @@ export class GoogleAdsService {
         });
         return [];
       }),
-      this.getBrandedSplitData(config, accessToken, includeLoginCustomerId).catch((error) => {
-        console.error("[Google Ads] Branded split query failed.", {
-          customerId: config.customerId,
-          error: this.getErrorMessage(error)
-        });
-        return [];
-      })
+      this.getTopSellingProductsSplitData(config, accessToken, includeLoginCustomerId).catch(
+        (error) => {
+          console.error("[Google Ads] Top selling products query failed.", {
+            customerId: config.customerId,
+            error: this.getErrorMessage(error)
+          });
+          return [];
+        }
+      )
     ]);
 
     return { rows, trend, split };

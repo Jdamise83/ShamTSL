@@ -11,7 +11,7 @@ export default async function GoogleAdsPage() {
       title="Google Ads"
       description="Grouped KPI rows with campaign and search term breakdowns."
       data={data}
-      splitTitle="Branded vs Non-Branded"
+      splitTitle="Top Selling Products"
       valuePrefix=""
     />
   );
