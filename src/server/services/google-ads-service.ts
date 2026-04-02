@@ -37,6 +37,16 @@ const PERIODS = [
   { range: "THIS_MONTH", label: "Month to date" }
 ] as const;
 
+type EnvHealth = {
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  hasDeveloperToken: boolean;
+  hasRefreshToken: boolean;
+  hasCustomerId: boolean;
+  hasLoginCustomerId: boolean;
+  hasRequiredEnv: boolean;
+};
+
 export class GoogleAdsService {
   private readEnv(name: string, required = true): string {
     const value = process.env[name]?.trim();
@@ -69,6 +79,26 @@ export class GoogleAdsService {
       loginCustomerId: loginCustomerRaw
         ? this.normalizeCustomerId(loginCustomerRaw, "GOOGLE_ADS_LOGIN_CUSTOMER_ID")
         : undefined
+    };
+  }
+
+  private getEnvHealth(): EnvHealth {
+    const hasClientId = Boolean(process.env.GOOGLE_ADS_CLIENT_ID?.trim());
+    const hasClientSecret = Boolean(process.env.GOOGLE_ADS_CLIENT_SECRET?.trim());
+    const hasDeveloperToken = Boolean(process.env.GOOGLE_ADS_DEVELOPER_TOKEN?.trim());
+    const hasRefreshToken = Boolean(process.env.GOOGLE_ADS_REFRESH_TOKEN?.trim());
+    const hasCustomerId = Boolean(process.env.GOOGLE_ADS_CUSTOMER_ID?.trim());
+    const hasLoginCustomerId = Boolean(process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID?.trim());
+
+    return {
+      hasClientId,
+      hasClientSecret,
+      hasDeveloperToken,
+      hasRefreshToken,
+      hasCustomerId,
+      hasLoginCustomerId,
+      hasRequiredEnv:
+        hasClientId && hasClientSecret && hasDeveloperToken && hasRefreshToken && hasCustomerId
     };
   }
 
@@ -355,8 +385,14 @@ export class GoogleAdsService {
 
   async getDashboardData(): Promise<GoogleAdsData> {
     let config: AdsConfig | undefined;
+    const envHealth = this.getEnvHealth();
 
     try {
+      if (!envHealth.hasRequiredEnv) {
+        console.error("[Google Ads] Missing required environment variables.", envHealth);
+        return this.fallback();
+      }
+
       config = this.getConfig();
       const data = await this.fetchDashboardRows(config, true);
       return this.buildDashboardData(data);
@@ -388,6 +424,7 @@ export class GoogleAdsService {
         customerId: config?.customerId ?? "<unset>",
         loginCustomerId: config?.loginCustomerId ?? "<unset>",
         accessibleCustomerIds,
+        envHealth,
         error: this.getErrorMessage(initialError)
       });
 
