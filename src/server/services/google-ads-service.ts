@@ -354,13 +354,14 @@ export class GoogleAdsService {
   }
 
   async getDashboardData(): Promise<GoogleAdsData> {
-    const config = this.getConfig();
+    let config: AdsConfig | undefined;
 
     try {
+      config = this.getConfig();
       const data = await this.fetchDashboardRows(config, true);
       return this.buildDashboardData(data);
     } catch (initialError) {
-      if (config.loginCustomerId && this.isPermissionError(initialError)) {
+      if (config?.loginCustomerId && this.isPermissionError(initialError)) {
         try {
           const data = await this.fetchDashboardRows(config, false);
 
@@ -382,10 +383,10 @@ export class GoogleAdsService {
         }
       }
 
-      const accessibleCustomerIds = await this.listAccessibleCustomers(config);
+      const accessibleCustomerIds = config ? await this.listAccessibleCustomers(config) : [];
       console.error("[Google Ads] Query failed.", {
-        customerId: config.customerId,
-        loginCustomerId: config.loginCustomerId,
+        customerId: config?.customerId ?? "<unset>",
+        loginCustomerId: config?.loginCustomerId ?? "<unset>",
         accessibleCustomerIds,
         error: this.getErrorMessage(initialError)
       });
