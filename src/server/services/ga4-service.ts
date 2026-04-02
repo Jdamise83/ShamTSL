@@ -29,44 +29,8 @@ class RealGa4Provider implements Ga4Provider {
     });
   }
 
-  async getDashboardData(): Promise<Ga4Data> {
-    const propertyId = process.env.GA4_PROPERTY_ID;
-
-    if (!propertyId) {
-      throw new Error("Missing GA4_PROPERTY_ID");
-    }
-
-    const client = this.getClient();
-
-    const [yesterdayReport] = await client.runReport({
-      property: `properties/${propertyId}`,
-      dateRanges: [{ startDate: "yesterday", endDate: "yesterday" }],
-      metrics: [{ name: "totalRevenue" }]
-    });
-
-    const [sevenDayReport] = await client.runReport({
-      property: `properties/${propertyId}`,
-      dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
-      metrics: [
-        { name: "activeUsers" },
-        { name: "sessions" },
-        { name: "totalRevenue" }
-      ]
-    });
-
-    const revenueYesterday = Number(
-      yesterdayReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
-    );
-
-    const activeUsers = Number(
-      sevenDayReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
-    );
-
-    const sessions = Number(
-      sevenDayReport.rows?.[0]?.metricValues?.[1]?.value ?? 0
-    );
-
-    const result = {
+  private getFallbackData(): Ga4Data {
+    return {
       kpiGroups: [
         {
           id: "ga4-overview",
@@ -75,19 +39,19 @@ class RealGa4Provider implements Ga4Provider {
             {
               id: "ga4-active-users",
               label: "Active Users",
-              value: activeUsers.toLocaleString(),
+              value: "-",
               change: undefined
             },
             {
               id: "ga4-sessions",
               label: "Sessions",
-              value: sessions.toLocaleString(),
+              value: "-",
               change: undefined
             },
             {
               id: "ga4-revenue",
               label: "Revenue",
-              value: `£${Math.round(revenueYesterday).toLocaleString()}`,
+              value: "-",
               change: undefined
             }
           ]
@@ -95,9 +59,83 @@ class RealGa4Provider implements Ga4Provider {
       ],
       charts: [],
       tables: []
-    };
+    } as unknown as Ga4Data;
+  }
 
-    return result as unknown as Ga4Data;
+  async getDashboardData(): Promise<Ga4Data> {
+    try {
+      const propertyId = process.env.GA4_PROPERTY_ID;
+
+      if (!propertyId) {
+        throw new Error("Missing GA4_PROPERTY_ID");
+      }
+
+      const client = this.getClient();
+
+      const [yesterdayReport] = await client.runReport({
+        property: `properties/${propertyId}`,
+        dateRanges: [{ startDate: "yesterday", endDate: "yesterday" }],
+        metrics: [{ name: "totalRevenue" }]
+      });
+
+      const [sevenDayReport] = await client.runReport({
+        property: `properties/${propertyId}`,
+        dateRanges: [{ startDate: "7daysAgo", endDate: "today" }],
+        metrics: [
+          { name: "activeUsers" },
+          { name: "sessions" },
+          { name: "totalRevenue" }
+        ]
+      });
+
+      const revenueYesterday = Number(
+        yesterdayReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
+      );
+
+      const activeUsers = Number(
+        sevenDayReport.rows?.[0]?.metricValues?.[0]?.value ?? 0
+      );
+
+      const sessions = Number(
+        sevenDayReport.rows?.[0]?.metricValues?.[1]?.value ?? 0
+      );
+
+      const result = {
+        kpiGroups: [
+          {
+            id: "ga4-overview",
+            label: "GA4 Overview",
+            metrics: [
+              {
+                id: "ga4-active-users",
+                label: "Active Users",
+                value: activeUsers.toLocaleString(),
+                change: undefined
+              },
+              {
+                id: "ga4-sessions",
+                label: "Sessions",
+                value: sessions.toLocaleString(),
+                change: undefined
+              },
+              {
+                id: "ga4-revenue",
+                label: "Revenue",
+                value: `£${Math.round(revenueYesterday).toLocaleString()}`,
+                change: undefined
+              }
+            ]
+          }
+        ],
+        charts: [],
+        tables: []
+      };
+
+      return result as unknown as Ga4Data;
+    } catch (error) {
+      console.error("GA4 runtime error:", error);
+      return this.getFallbackData();
+    }
   }
 }
 
