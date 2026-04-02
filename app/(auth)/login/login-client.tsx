@@ -18,15 +18,11 @@ export default function LoginClient() {
   const [error, setError] = useState<string | null>(null);
 
   const urlError = searchParams.get("error");
-const configMissing = urlError === "config_missing";
+  const configMissing = urlError === "config_missing";
 
   const helperMessage = useMemo(() => {
-  if (configMissing) {
-    return "Supabase environment variables are missing. Add them in your .env.local before signing in.";
-  }
-
-  return "Use your admin email and password to access the private dashboard.";
-}, [configMissing]);
+    if (configMissing) {
+      return "Supabase environment variables are missing. Add them in your .env.local before signing in.";
     }
 
     return "Use your admin email and password to access the private dashboard.";
@@ -113,10 +109,10 @@ const configMissing = urlError === "config_missing";
               </div>
 
               {error || urlError ? (
-  <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-    {error || decodeURIComponent(urlError as string)}
-  </p>
-) : null}
+                <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+                  {error || decodeURIComponent(urlError as string)}
+                </p>
+              ) : null}
 
               <Button type="submit" className="w-full" disabled={submitting || configMissing}>
                 {submitting ? "Signing in..." : "Sign In"}
