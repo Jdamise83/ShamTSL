@@ -2,7 +2,7 @@ import "server-only";
 
 import { addDays, formatISO, getDaysInMonth, isWithinInterval, parseISO } from "date-fns";
 
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   seededHolidayAdjustments,
   seededHolidayRequests,
@@ -123,31 +123,123 @@ function makeSummary(staff: StaffMember[], requests: HolidayRequest[]): TeamHoli
   };
 }
 
+async function getCurrentUserContext() {
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("User not authenticated.");
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("id,email,role")
+    .eq("id", user.id)
+    .single();
+
+  if (profileError) {
+    throw new Error(`Failed to fetch profile: ${profileError.message}`);
+  }
+
+  const { data: staffMember } = await supabase
+    .from("staff_members")
+    .select("id,email,profile_id")
+    .eq("profile_id", user.id)
+    .maybeSingle();
+
+  return {
+    supabase,
+    user,
+    profile,
+    role: profile?.role === "staff" ? "staff" : "admin",
+    staffMemberId: staffMember?.id ?? null
+  };
+}
+
 async function fetchSupabaseHolidayData() {
-  const admin = createSupabaseAdminClient();
-  if (!admin) {
-    return null;
+  const { supabase, role, staffMemberId } = await getCurrentUserContext();
+
+  if (role === "admin") {
+    const [staffResult, requestsResult, adjustmentsResult] = await Promise.all([
+      supabase
+        .from("staff_members")
+        .select(
+          "id,full_name,email,role_title,created_at,updated_at,holiday_balances(annual_allowance,used_holiday,remaining_holiday,credited_holiday,removed_holiday,manual_adjustments,pending_requests,approved_requests,rejected_requests)"
+        )
+        .order("full_name"),
+      supabase
+        .from("holiday_requests")
+        .select("id,staff_member_id,starts_on,ends_on,days_requested,reason,status,requested_at,reviewed_at,reviewed_by")
+        .order("requested_at", { ascending: false }),
+      supabase
+        .from("holiday_adjustments")
+        .select("id,staff_member_id,adjustment_type,amount_days,reason,created_by,created_at")
+        .order("created_at", { ascending: false })
+    ]);
+
+    if (staffResult.error) {
+      throw new Error(`Failed to fetch staff members: ${staffResult.error.message}`);
+    }
+
+    if (requestsResult.error) {
+      throw new Error(`Failed to fetch holiday requests: ${requestsResult.error.message}`);
+    }
+
+    if (adjustmentsResult.error) {
+      throw new Error(`Failed to fetch holiday adjustments: ${adjustmentsResult.error.message}`);
+    }
+
+    const staff = (staffResult.data ?? []).map(mapStaffRow);
+    const requests = (requestsResult.data ?? []).map(mapRequestRow);
+    const adjustments = (adjustmentsResult.data ?? []).map(mapAdjustmentRow);
+
+    return {
+      staff,
+      requests,
+      adjustments,
+      summary: makeSummary(staff, requests)
+    };
+  }
+
+  if (!staffMemberId) {
+    return {
+      staff: [],
+      requests: [],
+      adjustments: [],
+      summary: {
+        staffOnLeaveToday: 0,
+        pendingRequests: 0,
+        approvedThisMonth: 0,
+        remainingAllowanceTotal: 0
+      }
+    };
   }
 
   const [staffResult, requestsResult, adjustmentsResult] = await Promise.all([
-    admin
+    supabase
       .from("staff_members")
       .select(
         "id,full_name,email,role_title,created_at,updated_at,holiday_balances(annual_allowance,used_holiday,remaining_holiday,credited_holiday,removed_holiday,manual_adjustments,pending_requests,approved_requests,rejected_requests)"
       )
-      .order("full_name"),
-    admin
+      .eq("id", staffMemberId)
+      .single(),
+    supabase
       .from("holiday_requests")
       .select("id,staff_member_id,starts_on,ends_on,days_requested,reason,status,requested_at,reviewed_at,reviewed_by")
+      .eq("staff_member_id", staffMemberId)
       .order("requested_at", { ascending: false }),
-    admin
+    supabase
       .from("holiday_adjustments")
       .select("id,staff_member_id,adjustment_type,amount_days,reason,created_by,created_at")
+      .eq("staff_member_id", staffMemberId)
       .order("created_at", { ascending: false })
   ]);
 
   if (staffResult.error) {
-    throw new Error(`Failed to fetch staff members: ${staffResult.error.message}`);
+    throw new Error(`Failed to fetch staff member: ${staffResult.error.message}`);
   }
 
   if (requestsResult.error) {
@@ -158,7 +250,7 @@ async function fetchSupabaseHolidayData() {
     throw new Error(`Failed to fetch holiday adjustments: ${adjustmentsResult.error.message}`);
   }
 
-  const staff = (staffResult.data ?? []).map(mapStaffRow);
+  const staff = [mapStaffRow(staffResult.data)];
   const requests = (requestsResult.data ?? []).map(mapRequestRow);
   const adjustments = (adjustmentsResult.data ?? []).map(mapAdjustmentRow);
 
@@ -172,17 +264,16 @@ async function fetchSupabaseHolidayData() {
 
 export const holidayService = {
   async getDashboardData() {
-    const supabaseData = await fetchSupabaseHolidayData();
-    if (supabaseData) {
-      return supabaseData;
+    try {
+      return await fetchSupabaseHolidayData();
+    } catch {
+      return {
+        staff: inMemoryStaff,
+        requests: inMemoryRequests,
+        adjustments: inMemoryAdjustments,
+        summary: makeSummary(inMemoryStaff, inMemoryRequests)
+      };
     }
-
-    return {
-      staff: inMemoryStaff,
-      requests: inMemoryRequests,
-      adjustments: inMemoryAdjustments,
-      summary: makeSummary(inMemoryStaff, inMemoryRequests)
-    };
   },
 
   async getTeamHolidayCalendarEvents() {
@@ -205,291 +296,185 @@ export const holidayService = {
   async createHolidayRequest(input: HolidayRequestInput) {
     const daysRequested = calculateBusinessDays(input.startsOn, input.endsOn);
     const nowIso = formatISO(new Date());
-    const admin = createSupabaseAdminClient();
+    const { supabase, role, staffMemberId } = await getCurrentUserContext();
 
-    if (admin) {
-      const { data, error } = await admin
-        .from("holiday_requests")
-        .insert({
-          staff_member_id: input.staffMemberId,
-          starts_on: input.startsOn,
-          ends_on: input.endsOn,
-          days_requested: daysRequested,
-          reason: input.reason ?? null,
-          status: "pending",
-          requested_at: nowIso
-        })
-        .select("id,staff_member_id,starts_on,ends_on,days_requested,reason,status,requested_at,reviewed_at,reviewed_by")
-        .single();
+    const allowedStaffMemberId = role === "staff" ? staffMemberId : input.staffMemberId;
 
-      if (error) {
-        throw new Error(`Failed to create request: ${error.message}`);
-      }
-
-      const { data: balanceRow } = await admin
-        .from("holiday_balances")
-        .select("pending_requests")
-        .eq("staff_member_id", input.staffMemberId)
-        .single();
-
-      await admin
-        .from("holiday_balances")
-        .update({ pending_requests: (balanceRow?.pending_requests ?? 0) + 1 })
-        .eq("staff_member_id", input.staffMemberId);
-
-      return mapRequestRow(data);
+    if (!allowedStaffMemberId) {
+      throw new Error("No staff member linked to this user.");
     }
 
-    const request: HolidayRequest = {
-      id: `req_${Math.random().toString(36).slice(2, 9)}`,
-      staffMemberId: input.staffMemberId,
-      startsOn: input.startsOn,
-      endsOn: input.endsOn,
-      daysRequested,
-      reason: input.reason ?? null,
-      status: "pending",
-      requestedAt: nowIso,
-      reviewedAt: null,
-      reviewedBy: null
-    };
+    const { data, error } = await supabase
+      .from("holiday_requests")
+      .insert({
+        staff_member_id: allowedStaffMemberId,
+        starts_on: input.startsOn,
+        ends_on: input.endsOn,
+        days_requested: daysRequested,
+        reason: input.reason ?? null,
+        status: "pending",
+        requested_at: nowIso
+      })
+      .select("id,staff_member_id,starts_on,ends_on,days_requested,reason,status,requested_at,reviewed_at,reviewed_by")
+      .single();
 
-    inMemoryRequests = [request, ...inMemoryRequests];
-    inMemoryStaff = inMemoryStaff.map((staff) =>
-      staff.id === input.staffMemberId
-        ? { ...staff, pendingRequests: staff.pendingRequests + 1, updatedAt: nowIso }
-        : staff
-    );
+    if (error) {
+      throw new Error(`Failed to create request: ${error.message}`);
+    }
 
-    return request;
+    return mapRequestRow(data);
   },
 
   async reviewHolidayRequest(requestId: string, status: HolidayRequestStatus, reviewer: string) {
+    const { supabase, role } = await getCurrentUserContext();
+
+    if (role !== "admin") {
+      throw new Error("Only admins can review holiday requests.");
+    }
+
     if (status === "pending") {
       throw new Error("Review status must be approved or rejected.");
     }
 
     const nowIso = formatISO(new Date());
-    const admin = createSupabaseAdminClient();
 
-    if (admin) {
-      const { data: requestRow, error: requestError } = await admin
-        .from("holiday_requests")
-        .select("id,staff_member_id,days_requested,status")
-        .eq("id", requestId)
-        .single();
+    const { data: requestRow, error: requestError } = await supabase
+      .from("holiday_requests")
+      .select("id,staff_member_id,days_requested,status")
+      .eq("id", requestId)
+      .single();
 
-      if (requestError) {
-        throw new Error(`Failed to fetch request: ${requestError.message}`);
-      }
-
-      const { error: updateRequestError } = await admin
-        .from("holiday_requests")
-        .update({ status, reviewed_at: nowIso, reviewed_by: reviewer })
-        .eq("id", requestId);
-
-      if (updateRequestError) {
-        throw new Error(`Failed to review request: ${updateRequestError.message}`);
-      }
-
-      const { data: balanceRow, error: balanceError } = await admin
-        .from("holiday_balances")
-        .select(
-          "annual_allowance,used_holiday,remaining_holiday,credited_holiday,removed_holiday,manual_adjustments,pending_requests,approved_requests,rejected_requests"
-        )
-        .eq("staff_member_id", requestRow.staff_member_id)
-        .single();
-
-      if (balanceError) {
-        throw new Error(`Failed to fetch balance: ${balanceError.message}`);
-      }
-
-      const updatedBalance: Record<string, number> = {
-        pending_requests: Math.max((balanceRow.pending_requests ?? 1) - 1, 0),
-        approved_requests: balanceRow.approved_requests ?? 0,
-        rejected_requests: balanceRow.rejected_requests ?? 0,
-        manual_adjustments: balanceRow.manual_adjustments ?? 0,
-        used_holiday: balanceRow.used_holiday ?? 0,
-        remaining_holiday: balanceRow.remaining_holiday ?? 0
-      };
-
-      if (status === "approved") {
-        updatedBalance.approved_requests += 1;
-        updatedBalance.used_holiday += requestRow.days_requested;
-        updatedBalance.remaining_holiday = Math.max(
-          updatedBalance.remaining_holiday - requestRow.days_requested,
-          0
-        );
-      }
-
-      if (status === "rejected") {
-        updatedBalance.rejected_requests += 1;
-      }
-
-      const { error: updateBalanceError } = await admin
-        .from("holiday_balances")
-        .update(updatedBalance)
-        .eq("staff_member_id", requestRow.staff_member_id);
-
-      if (updateBalanceError) {
-        throw new Error(`Failed to update holiday balance: ${updateBalanceError.message}`);
-      }
-
-      return;
+    if (requestError) {
+      throw new Error(`Failed to fetch request: ${requestError.message}`);
     }
 
-    const request = inMemoryRequests.find((item) => item.id === requestId);
-    if (!request) {
-      throw new Error("Request not found.");
+    const { error: updateRequestError } = await supabase
+      .from("holiday_requests")
+      .update({ status, reviewed_at: nowIso, reviewed_by: reviewer })
+      .eq("id", requestId);
+
+    if (updateRequestError) {
+      throw new Error(`Failed to review request: ${updateRequestError.message}`);
     }
 
-    inMemoryRequests = inMemoryRequests.map((item) =>
-      item.id === requestId ? { ...item, status, reviewedAt: nowIso, reviewedBy: reviewer } : item
-    );
+    const { data: balanceRow, error: balanceError } = await supabase
+      .from("holiday_balances")
+      .select(
+        "annual_allowance,used_holiday,remaining_holiday,credited_holiday,removed_holiday,manual_adjustments,pending_requests,approved_requests,rejected_requests"
+      )
+      .eq("staff_member_id", requestRow.staff_member_id)
+      .single();
 
-    inMemoryStaff = inMemoryStaff.map((staff) => {
-      if (staff.id !== request.staffMemberId) {
-        return staff;
-      }
+    if (balanceError) {
+      throw new Error(`Failed to fetch balance: ${balanceError.message}`);
+    }
 
-      const pendingRequests = Math.max(staff.pendingRequests - 1, 0);
-      if (status === "approved") {
-        const usedHoliday = staff.usedHoliday + request.daysRequested;
-        return {
-          ...staff,
-          pendingRequests,
-          approvedRequests: staff.approvedRequests + 1,
-          usedHoliday,
-          remainingHoliday: Math.max(
-            staff.annualAllowance +
-              staff.creditedHoliday +
-              staff.manualAdjustments -
-              staff.removedHoliday -
-              usedHoliday,
-            0
-          ),
-          updatedAt: nowIso
-        };
-      }
+    const updatedBalance: Record<string, number> = {
+      pending_requests: Math.max((balanceRow.pending_requests ?? 1) - 1, 0),
+      approved_requests: balanceRow.approved_requests ?? 0,
+      rejected_requests: balanceRow.rejected_requests ?? 0,
+      manual_adjustments: balanceRow.manual_adjustments ?? 0,
+      used_holiday: balanceRow.used_holiday ?? 0,
+      remaining_holiday: balanceRow.remaining_holiday ?? 0
+    };
 
-      return {
-        ...staff,
-        pendingRequests,
-        rejectedRequests: staff.rejectedRequests + 1,
-        updatedAt: nowIso
-      };
-    });
+    if (status === "approved") {
+      updatedBalance.approved_requests += 1;
+      updatedBalance.used_holiday += requestRow.days_requested;
+      updatedBalance.remaining_holiday = Math.max(
+        updatedBalance.remaining_holiday - requestRow.days_requested,
+        0
+      );
+    }
+
+    if (status === "rejected") {
+      updatedBalance.rejected_requests += 1;
+    }
+
+    const { error: updateBalanceError } = await supabase
+      .from("holiday_balances")
+      .update(updatedBalance)
+      .eq("staff_member_id", requestRow.staff_member_id);
+
+    if (updateBalanceError) {
+      throw new Error(`Failed to update holiday balance: ${updateBalanceError.message}`);
+    }
   },
 
   async applyAdjustment(input: HolidayAdjustmentInput, actor: string) {
-    const nowIso = formatISO(new Date());
-    const admin = createSupabaseAdminClient();
+    const { supabase, role } = await getCurrentUserContext();
 
-    if (admin) {
-      const { data: inserted, error: insertError } = await admin
-        .from("holiday_adjustments")
-        .insert({
-          staff_member_id: input.staffMemberId,
-          adjustment_type: input.adjustmentType,
-          amount_days: input.amountDays,
-          reason: input.reason,
-          created_by: actor,
-          created_at: nowIso
-        })
-        .select("id,staff_member_id,adjustment_type,amount_days,reason,created_by,created_at")
-        .single();
-
-      if (insertError) {
-        throw new Error(`Failed to apply adjustment: ${insertError.message}`);
-      }
-
-      const { data: balanceRow, error: balanceError } = await admin
-        .from("holiday_balances")
-        .select(
-          "annual_allowance,used_holiday,remaining_holiday,credited_holiday,removed_holiday,manual_adjustments,pending_requests,approved_requests,rejected_requests"
-        )
-        .eq("staff_member_id", input.staffMemberId)
-        .single();
-
-      if (balanceError) {
-        throw new Error(`Failed to fetch balance: ${balanceError.message}`);
-      }
-
-      const updatedBalance: Record<string, number> = {
-        annual_allowance: balanceRow.annual_allowance ?? 0,
-        used_holiday: balanceRow.used_holiday ?? 0,
-        remaining_holiday: balanceRow.remaining_holiday ?? 0,
-        credited_holiday: balanceRow.credited_holiday ?? 0,
-        removed_holiday: balanceRow.removed_holiday ?? 0,
-        manual_adjustments: balanceRow.manual_adjustments ?? 0,
-        pending_requests: balanceRow.pending_requests ?? 0,
-        approved_requests: balanceRow.approved_requests ?? 0,
-        rejected_requests: balanceRow.rejected_requests ?? 0
-      };
-
-      if (input.adjustmentType === "credit") {
-        updatedBalance.credited_holiday += input.amountDays;
-        updatedBalance.remaining_holiday += input.amountDays;
-      }
-
-      if (input.adjustmentType === "remove") {
-        updatedBalance.removed_holiday += input.amountDays;
-        updatedBalance.remaining_holiday = Math.max(updatedBalance.remaining_holiday - input.amountDays, 0);
-      }
-
-      if (input.adjustmentType === "manual") {
-        updatedBalance.manual_adjustments += input.amountDays;
-        updatedBalance.remaining_holiday = Math.max(updatedBalance.remaining_holiday + input.amountDays, 0);
-      }
-
-      const { error: updateError } = await admin
-        .from("holiday_balances")
-        .update(updatedBalance)
-        .eq("staff_member_id", input.staffMemberId);
-
-      if (updateError) {
-        throw new Error(`Failed to update balance: ${updateError.message}`);
-      }
-
-      return mapAdjustmentRow(inserted);
+    if (role !== "admin") {
+      throw new Error("Only admins can apply adjustments.");
     }
 
-    const adjustment: HolidayAdjustment = {
-      id: `adj_${Math.random().toString(36).slice(2, 9)}`,
-      staffMemberId: input.staffMemberId,
-      adjustmentType: input.adjustmentType,
-      amountDays: input.amountDays,
-      reason: input.reason,
-      createdBy: actor,
-      createdAt: nowIso
+    const nowIso = formatISO(new Date());
+
+    const { data: inserted, error: insertError } = await supabase
+      .from("holiday_adjustments")
+      .insert({
+        staff_member_id: input.staffMemberId,
+        adjustment_type: input.adjustmentType,
+        amount_days: input.amountDays,
+        reason: input.reason,
+        created_by: actor,
+        created_at: nowIso
+      })
+      .select("id,staff_member_id,adjustment_type,amount_days,reason,created_by,created_at")
+      .single();
+
+    if (insertError) {
+      throw new Error(`Failed to apply adjustment: ${insertError.message}`);
+    }
+
+    const { data: balanceRow, error: balanceError } = await supabase
+      .from("holiday_balances")
+      .select(
+        "annual_allowance,used_holiday,remaining_holiday,credited_holiday,removed_holiday,manual_adjustments,pending_requests,approved_requests,rejected_requests"
+      )
+      .eq("staff_member_id", input.staffMemberId)
+      .single();
+
+    if (balanceError) {
+      throw new Error(`Failed to fetch balance: ${balanceError.message}`);
+    }
+
+    const updatedBalance: Record<string, number> = {
+      annual_allowance: balanceRow.annual_allowance ?? 0,
+      used_holiday: balanceRow.used_holiday ?? 0,
+      remaining_holiday: balanceRow.remaining_holiday ?? 0,
+      credited_holiday: balanceRow.credited_holiday ?? 0,
+      removed_holiday: balanceRow.removed_holiday ?? 0,
+      manual_adjustments: balanceRow.manual_adjustments ?? 0,
+      pending_requests: balanceRow.pending_requests ?? 0,
+      approved_requests: balanceRow.approved_requests ?? 0,
+      rejected_requests: balanceRow.rejected_requests ?? 0
     };
 
-    inMemoryAdjustments = [adjustment, ...inMemoryAdjustments];
+    if (input.adjustmentType === "credit") {
+      updatedBalance.credited_holiday += input.amountDays;
+      updatedBalance.remaining_holiday += input.amountDays;
+    }
 
-    inMemoryStaff = inMemoryStaff.map((staff) => {
-      if (staff.id !== input.staffMemberId) {
-        return staff;
-      }
+    if (input.adjustmentType === "remove") {
+      updatedBalance.removed_holiday += input.amountDays;
+      updatedBalance.remaining_holiday = Math.max(updatedBalance.remaining_holiday - input.amountDays, 0);
+    }
 
-      const updated = { ...staff, updatedAt: nowIso };
+    if (input.adjustmentType === "manual") {
+      updatedBalance.manual_adjustments += input.amountDays;
+      updatedBalance.remaining_holiday = Math.max(updatedBalance.remaining_holiday + input.amountDays, 0);
+    }
 
-      if (input.adjustmentType === "credit") {
-        updated.creditedHoliday += input.amountDays;
-        updated.remainingHoliday += input.amountDays;
-      }
+    const { error: updateError } = await supabase
+      .from("holiday_balances")
+      .update(updatedBalance)
+      .eq("staff_member_id", input.staffMemberId);
 
-      if (input.adjustmentType === "remove") {
-        updated.removedHoliday += input.amountDays;
-        updated.remainingHoliday = Math.max(updated.remainingHoliday - input.amountDays, 0);
-      }
+    if (updateError) {
+      throw new Error(`Failed to update balance: ${updateError.message}`);
+    }
 
-      if (input.adjustmentType === "manual") {
-        updated.manualAdjustments += input.amountDays;
-        updated.remainingHoliday = Math.max(updated.remainingHoliday + input.amountDays, 0);
-      }
-
-      return updated;
-    });
-
-    return adjustment;
+    return mapAdjustmentRow(inserted);
   }
 };
