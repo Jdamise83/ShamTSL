@@ -4,7 +4,6 @@ import { type NextRequest, NextResponse } from "next/server";
 import { env, hasSupabaseBrowserConfig } from "@/lib/env";
 
 const publicRoutes = ["/login"];
-const staffAllowedRoutes = ["/holidays"];
 
 export async function updateSession(request: NextRequest) {
   if (!hasSupabaseBrowserConfig()) {
@@ -22,7 +21,7 @@ export async function updateSession(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
@@ -52,32 +51,10 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    const role = profile?.role === "staff" ? "staff" : "admin";
-
-    if (role === "staff") {
-      const isAllowedStaffRoute = staffAllowedRoutes.some((route) =>
-        request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(`${route}/`)
-      );
-
-      if (!isAllowedStaffRoute && request.nextUrl.pathname !== "/login") {
-        const url = request.nextUrl.clone();
-        url.pathname = "/holidays";
-        return NextResponse.redirect(url);
-      }
-    }
-
-    if (request.nextUrl.pathname === "/login") {
-      const url = request.nextUrl.clone();
-      url.pathname = role === "staff" ? "/holidays" : "/home";
-      return NextResponse.redirect(url);
-    }
+  if (user && request.nextUrl.pathname === "/login") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/home";
+    return NextResponse.redirect(url);
   }
 
   return supabaseResponse;
