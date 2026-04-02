@@ -93,8 +93,14 @@ class RealGa4Provider implements Ga4Provider {
           ]
         }
       ],
-      charts: [],
-      tables: []
+      charts: [
+  {
+    id: "ga4-trend",
+    label: "Trend",
+    trend: []
+  }
+],
+tables: []
     };
   }
 }
