@@ -40,12 +40,14 @@ export const homeService = {
           value: seo.kpiGroups[0]?.metrics[0]?.value ?? "-",
           helper: "Last 7D Clicks"
         },
-        {
-          id: "ga4",
-          label: "GA4",
-          value: ga4.kpiGroups[0]?.metrics.find((metric) => metric.label === "Revenue")?.value ?? "-",
-          helper: "Yesterday Revenue"
-        },
+       {
+  id: "ga4",
+  label: "GA4",
+  value: (ga4 as any).activeUsers?.toLocaleString() ?? "-",
+  helper: `${(ga4 as any).sessions?.toLocaleString() ?? "-"} sessions | £${Math.round(
+    (ga4 as any).totalRevenue ?? 0
+  ).toLocaleString()} revenue`
+},
         {
           id: "unleashed",
           label: "Unleashed",
