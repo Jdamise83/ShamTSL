@@ -28,7 +28,7 @@ function getClient() {
 }
 
 function getMetricValue(
-  row: { metricValues?: Array<{ value?: string | null }> } | undefined,
+  row: { metricValues?: Array<{ value?: string | null }> | null } | null | undefined,
   index: number
 ) {
   return Number(row?.metricValues?.[index]?.value ?? 0);
