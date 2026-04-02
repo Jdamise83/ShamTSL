@@ -1,13 +1,35 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ArrowRight, CalendarDays, Umbrella } from "lucide-react";
 
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RangeLabel } from "@/components/dashboard/range-label";
 import { SectionHeader } from "@/components/dashboard/section-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { homeService } from "@/server/services";
 
 export default async function HomePage() {
+  const supabase = await createSupabaseServerClient();
+
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profile?.role === "staff") {
+    redirect("/holidays");
+  }
+
   const data = await homeService.getOverview();
 
   return (
