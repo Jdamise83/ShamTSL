@@ -66,7 +66,7 @@ class RealGa4Provider implements Ga4Provider {
       sevenDayReport.rows?.[0]?.metricValues?.[1]?.value ?? 0
     );
 
-    return {
+    const result = {
       kpiGroups: [
         {
           id: "ga4-overview",
@@ -93,15 +93,11 @@ class RealGa4Provider implements Ga4Provider {
           ]
         }
       ],
-      charts: [
-  {
-    id: "ga4-trend",
-    label: "Trend",
-    trend: []
-  }
-],
-tables: []
+      charts: [],
+      tables: []
     };
+
+    return result as unknown as Ga4Data;
   }
 }
 
