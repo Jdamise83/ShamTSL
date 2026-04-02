@@ -35,7 +35,7 @@ export function SidebarNav() {
         <img
           src="https://cdn.shopify.com/s/files/1/0991/4689/1610/files/new_thesnuslife_logotype.svg?v=1775047239"
           alt="The Snus Life"
-          className="h-10 w-auto"
+          className="h-14 w-auto"
         />
 
         <p className="mt-2 text-sm text-muted-foreground">

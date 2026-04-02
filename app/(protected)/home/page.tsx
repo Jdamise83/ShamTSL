@@ -13,8 +13,8 @@ export default async function HomePage() {
   return (
     <div className="space-y-8">
       <SectionHeader
-        title="Executive Overview"
-        description="High-signal overview across meetings, holidays and commercial performance."
+        title="C-Suite Dashboard"
+        description="Quick Dashboard For The Team"
       />
 
       <section className="space-y-3">
