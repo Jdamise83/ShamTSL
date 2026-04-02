@@ -39,6 +39,18 @@ type EnvHealth = {
   hasRequiredEnv: boolean;
 };
 
+type GoogleAdsRow = {
+  metrics?: Record<string, unknown>;
+  segments?: Record<string, unknown>;
+  campaign?: Record<string, unknown>;
+};
+
+type DashboardPayload = {
+  rows: PeriodTotals[];
+  trend: Array<{ label: string; value: number }>;
+  split: Array<{ label: string; value: number }>;
+};
+
 const PERIODS = [
   { range: "TODAY", label: "Today" },
   { range: "YESTERDAY", label: "Yesterday" },
@@ -167,7 +179,7 @@ export class GoogleAdsService {
     accessToken: string,
     query: string,
     includeLoginCustomerId: boolean
-  ): Promise<Array<{ metrics?: Record<string, unknown> }>> {
+  ): Promise<GoogleAdsRow[]> {
     const headers: Record<string, string> = {
       authorization: `Bearer ${accessToken}`,
       "developer-token": config.developerToken,
@@ -196,14 +208,13 @@ export class GoogleAdsService {
     }
 
     if (!Array.isArray(payload)) {
-      const singleChunk = payload as { results?: Array<{ metrics?: Record<string, unknown> }> };
+      const singleChunk = payload as { results?: GoogleAdsRow[] };
       return singleChunk.results ?? [];
     }
 
-    const rows: Array<{ metrics?: Record<string, unknown> }> = [];
+    const rows: GoogleAdsRow[] = [];
     payload.forEach((chunk) => {
-      const resultChunk = (chunk as { results?: Array<{ metrics?: Record<string, unknown> }> })
-        .results;
+      const resultChunk = (chunk as { results?: GoogleAdsRow[] }).results;
       if (Array.isArray(resultChunk)) {
         rows.push(...resultChunk);
       }
@@ -260,6 +271,140 @@ export class GoogleAdsService {
     }
 
     return 0;
+  }
+
+  private readString(value: unknown) {
+    return typeof value === "string" ? value : "";
+  }
+
+  private parseIsoDateToUtcLabel(dateText: string) {
+    const [yearText, monthText, dayText] = dateText.split("-");
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+
+    if (!year || !month || !day) {
+      return dateText;
+    }
+
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return new Intl.DateTimeFormat("en-GB", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      timeZone: "UTC"
+    }).format(date);
+  }
+
+  private async getTrendData(
+    config: AdsConfig,
+    accessToken: string,
+    includeLoginCustomerId: boolean
+  ): Promise<Array<{ label: string; value: number }>> {
+    const rows = await this.runSearchQuery(
+      config,
+      accessToken,
+      `
+      SELECT
+        segments.date,
+        metrics.cost_micros,
+        metrics.conversions_value
+      FROM customer
+      WHERE segments.date DURING LAST_7_DAYS
+      ORDER BY segments.date
+      `,
+      includeLoginCustomerId
+    );
+
+    const byDate = new Map<string, { cost: number; revenue: number }>();
+
+    for (const row of rows) {
+      const date = this.readString(row.segments?.date);
+      if (!date) {
+        continue;
+      }
+
+      const cost = this.readMetric(row.metrics, ["costMicros", "cost_micros"]);
+      const revenue = this.readMetric(row.metrics, ["conversionsValue", "conversions_value"]);
+
+      const existing = byDate.get(date) ?? { cost: 0, revenue: 0 };
+      existing.cost += cost;
+      existing.revenue += revenue;
+      byDate.set(date, existing);
+    }
+
+    return Array.from(byDate.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, totals]) => {
+        const spend = totals.cost / 1_000_000;
+        const roas = spend > 0 ? totals.revenue / spend : 0;
+        return {
+          label: this.parseIsoDateToUtcLabel(date),
+          value: Number(roas.toFixed(2))
+        };
+      });
+  }
+
+  private isBrandedCampaign(name: string) {
+    const normalized = name.toLowerCase();
+
+    const nonBrandedHints = ["non-brand", "non brand", "generic", "prospecting", "competitor"];
+    if (nonBrandedHints.some((hint) => normalized.includes(hint))) {
+      return false;
+    }
+
+    const brandedHints = ["brand", "branded", "tsl", "snus life", "thesnuslife"];
+    return brandedHints.some((hint) => normalized.includes(hint));
+  }
+
+  private async getBrandedSplitData(
+    config: AdsConfig,
+    accessToken: string,
+    includeLoginCustomerId: boolean
+  ): Promise<Array<{ label: string; value: number }>> {
+    const rows = await this.runSearchQuery(
+      config,
+      accessToken,
+      `
+      SELECT
+        campaign.name,
+        metrics.cost_micros
+      FROM campaign
+      WHERE segments.date DURING LAST_7_DAYS
+      `,
+      includeLoginCustomerId
+    );
+
+    let brandedCost = 0;
+    let nonBrandedCost = 0;
+
+    for (const row of rows) {
+      const campaignName = this.readString(row.campaign?.name);
+      const cost = this.readMetric(row.metrics, ["costMicros", "cost_micros"]);
+
+      if (cost <= 0) {
+        continue;
+      }
+
+      if (this.isBrandedCampaign(campaignName)) {
+        brandedCost += cost;
+      } else {
+        nonBrandedCost += cost;
+      }
+    }
+
+    const total = brandedCost + nonBrandedCost;
+    if (total <= 0) {
+      return [];
+    }
+
+    const brandedPercent = Math.round((brandedCost / total) * 100);
+    const nonBrandedPercent = Math.max(0, 100 - brandedPercent);
+
+    return [
+      { label: "Branded", value: brandedPercent },
+      { label: "Non-Branded", value: nonBrandedPercent }
+    ];
   }
 
   private async getRange(
@@ -325,7 +470,11 @@ export class GoogleAdsService {
     return value.toLocaleString("en-GB", { maximumFractionDigits: 2 });
   }
 
-  private buildDashboardData(rows: PeriodTotals[]): GoogleAdsData {
+  private buildDashboardData(
+    rows: PeriodTotals[],
+    trend: Array<{ label: string; value: number }>,
+    split: Array<{ label: string; value: number }>
+  ): GoogleAdsData {
     const monthToDate = rows.find((row) => row.period === "Month to date");
 
     return {
@@ -374,8 +523,8 @@ export class GoogleAdsService {
         }
       ],
       charts: {
-        trend: [],
-        split: []
+        trend,
+        split
       },
       tables: [
         {
@@ -395,13 +544,35 @@ export class GoogleAdsService {
     };
   }
 
-  private async fetchDashboardRows(config: AdsConfig, includeLoginCustomerId: boolean) {
+  private async fetchDashboardRows(
+    config: AdsConfig,
+    includeLoginCustomerId: boolean
+  ): Promise<DashboardPayload> {
     const accessToken = await this.getOAuthAccessToken(config);
-    return Promise.all(
-      PERIODS.map((period) =>
-        this.getRange(config, accessToken, period.range, period.label, includeLoginCustomerId)
-      )
-    );
+
+    const [rows, trend, split] = await Promise.all([
+      Promise.all(
+        PERIODS.map((period) =>
+          this.getRange(config, accessToken, period.range, period.label, includeLoginCustomerId)
+        )
+      ),
+      this.getTrendData(config, accessToken, includeLoginCustomerId).catch((error) => {
+        console.error("[Google Ads] Trend query failed.", {
+          customerId: config.customerId,
+          error: this.getErrorMessage(error)
+        });
+        return [];
+      }),
+      this.getBrandedSplitData(config, accessToken, includeLoginCustomerId).catch((error) => {
+        console.error("[Google Ads] Branded split query failed.", {
+          customerId: config.customerId,
+          error: this.getErrorMessage(error)
+        });
+        return [];
+      })
+    ]);
+
+    return { rows, trend, split };
   }
 
   private async listAccessibleCustomers(config: AdsConfig): Promise<string[]> {
@@ -573,7 +744,7 @@ export class GoogleAdsService {
 
       config = this.getConfig();
       const data = await this.fetchDashboardRows(config, true);
-      return this.buildDashboardData(data);
+      return this.buildDashboardData(data.rows, data.trend, data.split);
     } catch (initialError) {
       if (config?.loginCustomerId && this.isPermissionError(initialError)) {
         try {
@@ -581,7 +752,7 @@ export class GoogleAdsService {
           console.warn(
             `[Google Ads] login_customer_id=${config.loginCustomerId} could not access customer ${config.customerId}. Retried without login_customer_id and succeeded.`
           );
-          return this.buildDashboardData(data);
+          return this.buildDashboardData(data.rows, data.trend, data.split);
         } catch (retryError) {
           const accessibleCustomerIds = await this.listAccessibleCustomers(config);
           console.error("[Google Ads] Auth failed (with and without login_customer_id).", {
