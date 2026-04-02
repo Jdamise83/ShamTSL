@@ -39,6 +39,11 @@ type SearchConsoleTotals = {
   position: number;
 };
 
+type KpiGroupsResult = {
+  groups: SeoData["kpiGroups"];
+  hasData: boolean;
+};
+
 type SearchConsoleAggregate = {
   clicks: number;
   impressions: number;
@@ -370,7 +375,7 @@ class RealSeoProvider implements SeoProvider {
         },
         body: JSON.stringify({
           ...body,
-          dataState: body.dataState ?? "final",
+          dataState: body.dataState ?? "all",
           type: body.type ?? "web"
         })
       });
@@ -450,7 +455,14 @@ class RealSeoProvider implements SeoProvider {
     }).format(date);
   }
 
-  private async getKpiGroups(config: SearchConsoleConfig, accessToken: string) {
+  private hasRowData(rows: SearchConsoleRow[]) {
+    return rows.some((row) => Number(row.clicks ?? 0) > 0 || Number(row.impressions ?? 0) > 0);
+  }
+
+  private async getKpiGroups(
+    config: SearchConsoleConfig,
+    accessToken: string
+  ): Promise<KpiGroupsResult> {
     const periods = this.getReportingPeriods();
 
     const periodRows = await Promise.all(
@@ -463,7 +475,7 @@ class RealSeoProvider implements SeoProvider {
       )
     );
 
-    return periods.map((period, index) => {
+    const groups = periods.map((period, index) => {
       const totals = this.getTotalsFromRows(periodRows[index]);
       return {
         id: period.id,
@@ -496,6 +508,11 @@ class RealSeoProvider implements SeoProvider {
         ]
       };
     });
+
+    return {
+      groups,
+      hasData: periodRows.some((rows) => this.hasRowData(rows))
+    };
   }
 
   private async getTrendData(config: SearchConsoleConfig, accessToken: string) {
@@ -636,16 +653,24 @@ class RealSeoProvider implements SeoProvider {
       const config = this.getConfig();
       const accessToken = await this.getAccessToken(config);
 
-      const [kpiGroups, trend, split, topQueries, topPages] = await Promise.all([
+      const [kpiResult, trend, split, topQueries, topPages, accessibleSites] = await Promise.all([
         this.getKpiGroups(config, accessToken),
         this.getTrendData(config, accessToken),
         this.getSplitData(config, accessToken),
         this.getTopQueryRows(config, accessToken),
-        this.getTopPageRows(config, accessToken)
+        this.getTopPageRows(config, accessToken),
+        this.listAccessibleSites(accessToken)
       ]);
 
+      if (!kpiResult.hasData && !trend.length && !topQueries.length && !topPages.length) {
+        console.warn("[SEO] Connected but no Search Console data returned.", {
+          configuredSiteUrl: config.siteUrl,
+          accessibleSites
+        });
+      }
+
       return {
-        kpiGroups,
+        kpiGroups: kpiResult.groups,
         charts: {
           trend,
           split
