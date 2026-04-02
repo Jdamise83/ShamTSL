@@ -578,6 +578,26 @@ class RealSeoProvider implements SeoProvider {
     }).format(date);
   }
 
+  private formatPageLabel(pageUrl: string) {
+    try {
+      const parsed = new URL(pageUrl);
+      const path = decodeURIComponent(parsed.pathname || "/");
+      if (path === "/" || path === "") {
+        return "Homepage";
+      }
+
+      const normalized = path
+        .replace(/\/+/g, "/")
+        .replace(/^\//, "")
+        .replace(/\/$/, "")
+        .replace(/[-_]+/g, " ");
+      const label = normalized || "Page";
+      return label.length > 36 ? `${label.slice(0, 33)}...` : label;
+    } catch {
+      return pageUrl.length > 36 ? `${pageUrl.slice(0, 33)}...` : pageUrl;
+    }
+  }
+
   private hasRowData(rows: SearchConsoleRow[]) {
     return rows.some((row) => Number(row.clicks ?? 0) > 0 || Number(row.impressions ?? 0) > 0);
   }
@@ -655,39 +675,35 @@ class RealSeoProvider implements SeoProvider {
     const rows = await this.runSearchQuery(siteUrl, accessToken, {
       startDate: this.toIsoDate(this.daysAgo(30)),
       endDate: this.toIsoDate(this.daysAgo(1)),
-      dimensions: ["query"],
-      rowLimit: 250
+      dimensions: ["page"],
+      rowLimit: 50
     });
 
-    let brandedClicks = 0;
-    let unbrandedClicks = 0;
+    const topPages = rows
+      .map((row) => ({
+        page: (row.keys?.[0] ?? "").trim(),
+        clicks: Number(row.clicks ?? 0)
+      }))
+      .filter((row) => Boolean(row.page) && row.clicks > 0)
+      .sort((a, b) => b.clicks - a.clicks)
+      .slice(0, 5);
 
-    rows.forEach((row) => {
-      const query = (row.keys?.[0] ?? "").trim();
-      const clicks = Number(row.clicks ?? 0);
-      if (!query || clicks <= 0) {
-        return;
-      }
-
-      if (this.isBrandedQuery(query)) {
-        brandedClicks += clicks;
-      } else {
-        unbrandedClicks += clicks;
-      }
-    });
-
-    const total = brandedClicks + unbrandedClicks;
-    if (total <= 0) {
+    const totalClicks = topPages.reduce((sum, row) => sum + row.clicks, 0);
+    if (totalClicks <= 0) {
       return [];
     }
 
-    const branded = Math.round((brandedClicks / total) * 100);
-    const unbranded = Math.max(0, 100 - branded);
+    const split = topPages.map((row) => ({
+      label: this.formatPageLabel(row.page),
+      value: Math.round((row.clicks / totalClicks) * 100)
+    }));
 
-    return [
-      { label: "Branded", value: branded },
-      { label: "Unbranded", value: unbranded }
-    ];
+    const splitTotal = split.reduce((sum, item) => sum + item.value, 0);
+    if (split.length && splitTotal !== 100) {
+      split[split.length - 1].value = Math.max(0, split[split.length - 1].value + (100 - splitTotal));
+    }
+
+    return split.filter((item) => item.value > 0);
   }
 
   private async getTopQueryRows(siteUrl: string, accessToken: string) {

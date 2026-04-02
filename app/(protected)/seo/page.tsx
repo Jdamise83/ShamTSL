@@ -11,7 +11,7 @@ export default async function SeoPage() {
       title="SEO"
       description="Search Console style performance with query and landing-page depth."
       data={data}
-      splitTitle="Branded vs Unbranded"
+      splitTitle="Top Ranking Posts by Clicks (Last 30 Days)"
     />
   );
 }
