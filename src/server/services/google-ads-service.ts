@@ -1,5 +1,4 @@
 import "server-only";
-import { GoogleAdsApi } from "google-ads-api";
 
 import type { GoogleAdsData } from "@/types/integrations";
 
@@ -30,13 +29,6 @@ type AdsConfig = {
   loginCustomerId?: string;
 };
 
-const PERIODS = [
-  { range: "TODAY", label: "Today" },
-  { range: "YESTERDAY", label: "Yesterday" },
-  { range: "LAST_7_DAYS", label: "Last 7 days" },
-  { range: "THIS_MONTH", label: "Month to date" }
-] as const;
-
 type EnvHealth = {
   hasClientId: boolean;
   hasClientSecret: boolean;
@@ -46,6 +38,15 @@ type EnvHealth = {
   hasLoginCustomerId: boolean;
   hasRequiredEnv: boolean;
 };
+
+const PERIODS = [
+  { range: "TODAY", label: "Today" },
+  { range: "YESTERDAY", label: "Yesterday" },
+  { range: "LAST_7_DAYS", label: "Last 7 days" },
+  { range: "THIS_MONTH", label: "Month to date" }
+] as const;
+
+const GOOGLE_ADS_API_VERSION = "v23";
 
 export class GoogleAdsService {
   private readEnv(name: string, required = true): string {
@@ -103,90 +104,214 @@ export class GoogleAdsService {
     };
   }
 
-  private getClient(config: AdsConfig) {
-    return new GoogleAdsApi({
+  private async getOAuthAccessToken(config: AdsConfig): Promise<string> {
+    const body = new URLSearchParams({
       client_id: config.clientId,
       client_secret: config.clientSecret,
-      developer_token: config.developerToken
+      refresh_token: config.refreshToken,
+      grant_type: "refresh_token"
     });
+
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded"
+      },
+      body
+    });
+
+    const payload = await this.parseJsonSafe(response);
+
+    if (!response.ok) {
+      const errorMessage = this.getOAuthErrorMessage(payload);
+      throw new Error(`OAuth refresh failed (${response.status}): ${errorMessage}`);
+    }
+
+    const accessToken = (payload as { access_token?: unknown })?.access_token;
+    if (typeof accessToken !== "string" || !accessToken) {
+      throw new Error("OAuth refresh succeeded but access token was missing.");
+    }
+
+    return accessToken;
   }
 
-  private getCustomer(config: AdsConfig, includeLoginCustomerId: boolean) {
-    const customerOptions: {
-      customer_id: string;
-      refresh_token: string;
-      login_customer_id?: string;
-    } = {
-      customer_id: config.customerId,
-      refresh_token: config.refreshToken
+  private async parseJsonSafe(response: Response): Promise<unknown> {
+    try {
+      return await response.json();
+    } catch {
+      return {};
+    }
+  }
+
+  private getOAuthErrorMessage(payload: unknown) {
+    if (typeof payload !== "object" || payload === null) {
+      return "unknown_oauth_error";
+    }
+
+    const oauthError = payload as { error?: unknown; error_description?: unknown };
+    const parts: string[] = [];
+
+    if (typeof oauthError.error === "string") {
+      parts.push(`error=${oauthError.error}`);
+    }
+
+    if (typeof oauthError.error_description === "string") {
+      parts.push(`error_description=${oauthError.error_description}`);
+    }
+
+    return parts.length > 0 ? parts.join(" | ") : "unknown_oauth_error";
+  }
+
+  private async runSearchQuery(
+    config: AdsConfig,
+    accessToken: string,
+    query: string,
+    includeLoginCustomerId: boolean
+  ): Promise<Array<{ metrics?: Record<string, unknown> }>> {
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${accessToken}`,
+      "developer-token": config.developerToken,
+      "content-type": "application/json"
     };
 
     if (includeLoginCustomerId && config.loginCustomerId) {
-      customerOptions.login_customer_id = config.loginCustomerId;
+      headers["login-customer-id"] = config.loginCustomerId;
     }
 
-    const client = this.getClient(config);
-
-    return client.Customer(customerOptions);
-  }
-
-  private isPermissionError(error: unknown) {
-    const message = this.getErrorMessage(error).toLowerCase();
-    return (
-      message.includes("permission") ||
-      message.includes("not authorized") ||
-      message.includes("authorization") ||
-      message.includes("login customer")
+    const response = await fetch(
+      `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers/${config.customerId}/googleAds:searchStream`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query })
+      }
     );
+
+    const payload = await this.parseJsonSafe(response);
+
+    if (!response.ok) {
+      throw new Error(
+        `Google Ads search failed (${response.status}): ${this.getGoogleAdsApiErrorMessage(payload)}`
+      );
+    }
+
+    if (!Array.isArray(payload)) {
+      const singleChunk = payload as { results?: Array<{ metrics?: Record<string, unknown> }> };
+      return singleChunk.results ?? [];
+    }
+
+    const rows: Array<{ metrics?: Record<string, unknown> }> = [];
+    payload.forEach((chunk) => {
+      const resultChunk = (chunk as { results?: Array<{ metrics?: Record<string, unknown> }> })
+        .results;
+      if (Array.isArray(resultChunk)) {
+        rows.push(...resultChunk);
+      }
+    });
+
+    return rows;
   }
 
-  private getErrorMessage(error: unknown) {
-    if (!error) {
-      return "Unknown Google Ads error";
+  private getGoogleAdsApiErrorMessage(payload: unknown) {
+    if (typeof payload !== "object" || payload === null) {
+      return "unknown_google_ads_error";
     }
 
-    if (error instanceof Error) {
-      return error.message;
-    }
-
-    if (typeof error === "object" && error !== null) {
-      const typedError = error as {
+    const root = payload as {
+      error?: {
         code?: unknown;
-        details?: unknown;
         message?: unknown;
-        note?: unknown;
+        status?: unknown;
       };
+    };
 
-      const parts: string[] = [];
-
-      if (typeof typedError.code === "number" || typeof typedError.code === "string") {
-        parts.push(`code=${typedError.code}`);
+    const parts: string[] = [];
+    if (root.error) {
+      if (typeof root.error.code === "number" || typeof root.error.code === "string") {
+        parts.push(`code=${root.error.code}`);
       }
-
-      if (typeof typedError.details === "string") {
-        parts.push(`details=${typedError.details}`);
+      if (typeof root.error.status === "string") {
+        parts.push(`status=${root.error.status}`);
       }
-
-      if (typeof typedError.message === "string") {
-        parts.push(`message=${typedError.message}`);
-      }
-
-      if (typeof typedError.note === "string") {
-        parts.push(`note=${typedError.note}`);
-      }
-
-      if (parts.length > 0) {
-        return parts.join(" | ");
-      }
-
-      try {
-        return JSON.stringify(error);
-      } catch {
-        return "Unknown Google Ads error object";
+      if (typeof root.error.message === "string") {
+        parts.push(`message=${root.error.message}`);
       }
     }
 
-    return String(error);
+    return parts.length > 0 ? parts.join(" | ") : "unknown_google_ads_error";
+  }
+
+  private readMetric(metrics: Record<string, unknown> | undefined, keys: string[]) {
+    if (!metrics) {
+      return 0;
+    }
+
+    for (const key of keys) {
+      const value = metrics[key];
+      if (typeof value === "number") {
+        return value;
+      }
+      if (typeof value === "string" && value.trim()) {
+        const parsed = Number(value);
+        if (!Number.isNaN(parsed)) {
+          return parsed;
+        }
+      }
+    }
+
+    return 0;
+  }
+
+  private async getRange(
+    config: AdsConfig,
+    accessToken: string,
+    dateRange: string,
+    label: string,
+    includeLoginCustomerId: boolean
+  ): Promise<PeriodTotals> {
+    const rows = await this.runSearchQuery(
+      config,
+      accessToken,
+      `
+      SELECT
+        metrics.cost_micros,
+        metrics.clicks,
+        metrics.impressions,
+        metrics.conversions,
+        metrics.conversions_value
+      FROM customer
+      WHERE segments.date DURING ${dateRange}
+      `,
+      includeLoginCustomerId
+    );
+
+    const totals = rows.reduce<Totals>(
+      (acc, row) => {
+        const metrics = row.metrics;
+
+        acc.cost += this.readMetric(metrics, ["costMicros", "cost_micros"]);
+        acc.clicks += this.readMetric(metrics, ["clicks"]);
+        acc.impressions += this.readMetric(metrics, ["impressions"]);
+        acc.conversions += this.readMetric(metrics, ["conversions"]);
+        acc.revenue += this.readMetric(metrics, ["conversionsValue", "conversions_value"]);
+
+        return acc;
+      },
+      { cost: 0, clicks: 0, impressions: 0, conversions: 0, revenue: 0 }
+    );
+
+    const spend = totals.cost / 1_000_000;
+    const roas = spend > 0 ? totals.revenue / spend : 0;
+
+    return {
+      period: label,
+      spend,
+      clicks: totals.clicks,
+      impressions: totals.impressions,
+      conversions: totals.conversions,
+      revenue: totals.revenue,
+      roas
+    };
   }
 
   private formatCurrency(value: number) {
@@ -270,69 +395,73 @@ export class GoogleAdsService {
     };
   }
 
-  private async getRange(
-    customer: ReturnType<GoogleAdsApi["Customer"]>,
-    dateRange: string,
-    label: string
-  ): Promise<PeriodTotals> {
-    const res = await customer.query(`
-      SELECT
-        metrics.cost_micros,
-        metrics.clicks,
-        metrics.impressions,
-        metrics.conversions,
-        metrics.conversions_value
-      FROM customer
-      WHERE segments.date DURING ${dateRange}
-    `);
-
-    const totals = res.reduce<Totals>(
-      (acc, row) => {
-        const metrics = row.metrics;
-
-        acc.cost += Number(metrics?.cost_micros ?? 0);
-        acc.clicks += Number(metrics?.clicks ?? 0);
-        acc.impressions += Number(metrics?.impressions ?? 0);
-        acc.conversions += Number(metrics?.conversions ?? 0);
-        acc.revenue += Number(metrics?.conversions_value ?? 0);
-
-        return acc;
-      },
-      { cost: 0, clicks: 0, impressions: 0, conversions: 0, revenue: 0 }
-    );
-
-    const spend = totals.cost / 1_000_000;
-    const roas = spend > 0 ? totals.revenue / spend : 0;
-
-    return {
-      period: label,
-      spend,
-      clicks: totals.clicks,
-      impressions: totals.impressions,
-      conversions: totals.conversions,
-      revenue: totals.revenue,
-      roas
-    };
-  }
-
   private async fetchDashboardRows(config: AdsConfig, includeLoginCustomerId: boolean) {
-    const customer = this.getCustomer(config, includeLoginCustomerId);
-    return Promise.all(PERIODS.map((period) => this.getRange(customer, period.range, period.label)));
+    const accessToken = await this.getOAuthAccessToken(config);
+    return Promise.all(
+      PERIODS.map((period) =>
+        this.getRange(config, accessToken, period.range, period.label, includeLoginCustomerId)
+      )
+    );
   }
 
   private async listAccessibleCustomers(config: AdsConfig): Promise<string[]> {
     try {
-      const client = this.getClient(config);
-      const response = await client.listAccessibleCustomers(config.refreshToken);
+      const accessToken = await this.getOAuthAccessToken(config);
+      const response = await fetch(
+        `https://googleads.googleapis.com/${GOOGLE_ADS_API_VERSION}/customers:listAccessibleCustomers`,
+        {
+          method: "GET",
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            "developer-token": config.developerToken
+          }
+        }
+      );
+
+      const payload = await this.parseJsonSafe(response);
+      if (!response.ok) {
+        return [];
+      }
+
       const resourceNames =
-        (response as { resourceNames?: string[] }).resourceNames ??
-        (response as { resource_names?: string[] }).resource_names ??
+        (payload as { resourceNames?: string[] }).resourceNames ??
+        (payload as { resource_names?: string[] }).resource_names ??
         [];
 
       return resourceNames.map((name) => name.replace("customers/", ""));
     } catch {
       return [];
     }
+  }
+
+  private getErrorMessage(error: unknown) {
+    if (!error) {
+      return "Unknown Google Ads error";
+    }
+
+    if (error instanceof Error) {
+      return error.message;
+    }
+
+    if (typeof error === "object" && error !== null) {
+      try {
+        return JSON.stringify(error);
+      } catch {
+        return "Unknown Google Ads error object";
+      }
+    }
+
+    return String(error);
+  }
+
+  private isPermissionError(error: unknown) {
+    const message = this.getErrorMessage(error).toLowerCase();
+    return (
+      message.includes("permission") ||
+      message.includes("not authorized") ||
+      message.includes("authorization") ||
+      message.includes("login customer")
+    );
   }
 
   private fallback(): GoogleAdsData {
@@ -355,8 +484,26 @@ export class GoogleAdsService {
               change: undefined
             },
             {
+              id: "ads-impressions",
+              label: "Impressions",
+              value: "-",
+              change: undefined
+            },
+            {
+              id: "ads-conversions",
+              label: "Conversions",
+              value: "-",
+              change: undefined
+            },
+            {
               id: "ads-roas",
               label: "ROAS",
+              value: "-",
+              change: undefined
+            },
+            {
+              id: "ads-total-revenue",
+              label: "Total Revenue",
               value: "-",
               change: undefined
             }
@@ -415,8 +562,8 @@ export class GoogleAdsService {
   }
 
   async getDashboardData(): Promise<GoogleAdsData> {
-    let config: AdsConfig | undefined;
     const envHealth = this.getEnvHealth();
+    let config: AdsConfig | undefined;
 
     try {
       if (!envHealth.hasRequiredEnv) {
@@ -431,11 +578,9 @@ export class GoogleAdsService {
       if (config?.loginCustomerId && this.isPermissionError(initialError)) {
         try {
           const data = await this.fetchDashboardRows(config, false);
-
           console.warn(
             `[Google Ads] login_customer_id=${config.loginCustomerId} could not access customer ${config.customerId}. Retried without login_customer_id and succeeded.`
           );
-
           return this.buildDashboardData(data);
         } catch (retryError) {
           const accessibleCustomerIds = await this.listAccessibleCustomers(config);
@@ -443,6 +588,7 @@ export class GoogleAdsService {
             customerId: config.customerId,
             loginCustomerId: config.loginCustomerId,
             accessibleCustomerIds,
+            envHealth,
             initialError: this.getErrorMessage(initialError),
             retryError: this.getErrorMessage(retryError)
           });
