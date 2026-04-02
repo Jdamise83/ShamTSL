@@ -49,7 +49,8 @@ type EnvHealth = {
 
 export class GoogleAdsService {
   private readEnv(name: string, required = true): string {
-    const value = process.env[name]?.trim();
+    const rawValue = process.env[name];
+    const value = rawValue?.trim().replace(/^['"]|['"]$/g, "");
     if (!value && required) {
       throw new Error(`Missing ${name}`);
     }
@@ -149,9 +150,39 @@ export class GoogleAdsService {
     }
 
     if (typeof error === "object" && error !== null) {
-      const maybeMessage = (error as { message?: unknown }).message;
-      if (typeof maybeMessage === "string") {
-        return maybeMessage;
+      const typedError = error as {
+        code?: unknown;
+        details?: unknown;
+        message?: unknown;
+        note?: unknown;
+      };
+
+      const parts: string[] = [];
+
+      if (typeof typedError.code === "number" || typeof typedError.code === "string") {
+        parts.push(`code=${typedError.code}`);
+      }
+
+      if (typeof typedError.details === "string") {
+        parts.push(`details=${typedError.details}`);
+      }
+
+      if (typeof typedError.message === "string") {
+        parts.push(`message=${typedError.message}`);
+      }
+
+      if (typeof typedError.note === "string") {
+        parts.push(`note=${typedError.note}`);
+      }
+
+      if (parts.length > 0) {
+        return parts.join(" | ");
+      }
+
+      try {
+        return JSON.stringify(error);
+      } catch {
+        return "Unknown Google Ads error object";
       }
     }
 
