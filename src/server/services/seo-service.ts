@@ -18,6 +18,13 @@ type SearchConsoleConfig = {
   privateKey: string;
 };
 
+type SearchConsoleEnvHealth = {
+  hasSiteUrl: boolean;
+  hasClientEmail: boolean;
+  hasPrivateKey: boolean;
+  hasRequiredEnv: boolean;
+};
+
 type SearchConsolePeriod = {
   id: string;
   label: string;
@@ -88,6 +95,27 @@ class RealSeoProvider implements SeoProvider {
     ).replace(/\\n/g, "\n");
 
     return { siteUrl, clientEmail, privateKey };
+  }
+
+  private getEnvHealth(): SearchConsoleEnvHealth {
+    const hasSiteUrl = Boolean(this.readEnv("SEARCH_CONSOLE_SITE_URL"));
+    const hasClientEmail = Boolean(
+      this.readEnv("SEARCH_CONSOLE_CLIENT_EMAIL") ||
+        this.readEnv("GOOGLE_CLIENT_EMAIL") ||
+        this.readEnv("GA4_CLIENT_EMAIL")
+    );
+    const hasPrivateKey = Boolean(
+      this.readEnv("SEARCH_CONSOLE_PRIVATE_KEY") ||
+        this.readEnv("GOOGLE_PRIVATE_KEY") ||
+        this.readEnv("GA4_PRIVATE_KEY")
+    );
+
+    return {
+      hasSiteUrl,
+      hasClientEmail,
+      hasPrivateKey,
+      hasRequiredEnv: hasSiteUrl && hasClientEmail && hasPrivateKey
+    };
   }
 
   private getBrandTerms() {
@@ -285,7 +313,40 @@ class RealSeoProvider implements SeoProvider {
       candidates.add(`${withProtocol}/`);
     }
 
+    try {
+      const url = new URL(withProtocol);
+      candidates.add(`sc-domain:${url.hostname}`);
+      if (url.hostname.startsWith("www.")) {
+        candidates.add(`sc-domain:${url.hostname.slice(4)}`);
+      }
+    } catch {
+      // If parsing fails, we still keep the original URL candidates.
+    }
+
     return [...candidates];
+  }
+
+  private async listAccessibleSites(accessToken: string): Promise<string[]> {
+    try {
+      const response = await fetch(`${SEARCH_CONSOLE_QUERY_BASE}`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${accessToken}`
+        }
+      });
+
+      const payload = await this.parseJsonSafe(response);
+      if (!response.ok) {
+        return [];
+      }
+
+      const entries = (payload as { siteEntry?: Array<{ siteUrl?: string }> }).siteEntry ?? [];
+      return entries
+        .map((entry) => entry.siteUrl ?? "")
+        .filter((site): site is string => Boolean(site));
+    } catch {
+      return [];
+    }
   }
 
   private async runSearchQuery(
@@ -564,7 +625,14 @@ class RealSeoProvider implements SeoProvider {
   }
 
   async getDashboardData(): Promise<SeoData> {
+    const envHealth = this.getEnvHealth();
+
     try {
+      if (!envHealth.hasRequiredEnv) {
+        console.error("[SEO] Missing Search Console environment variables.", envHealth);
+        return this.fallback();
+      }
+
       const config = this.getConfig();
       const accessToken = await this.getAccessToken(config);
 
@@ -597,7 +665,21 @@ class RealSeoProvider implements SeoProvider {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error("[SEO] Search Console connection failed:", errorMessage);
+      let accessibleSites: string[] = [];
+      try {
+        const config = this.getConfig();
+        const accessToken = await this.getAccessToken(config);
+        accessibleSites = await this.listAccessibleSites(accessToken);
+      } catch {
+        accessibleSites = [];
+      }
+
+      console.error("[SEO] Search Console connection failed:", {
+        error: errorMessage,
+        envHealth,
+        configuredSiteUrl: this.readEnv("SEARCH_CONSOLE_SITE_URL"),
+        accessibleSites
+      });
       return this.fallback();
     }
   }
