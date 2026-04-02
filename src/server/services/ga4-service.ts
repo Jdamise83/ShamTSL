@@ -76,19 +76,19 @@ class RealGa4Provider implements Ga4Provider {
               id: "ga4-active-users",
               label: "Active Users",
               value: activeUsers.toLocaleString(),
-              change: null
+              change: undefined
             },
             {
               id: "ga4-sessions",
               label: "Sessions",
               value: sessions.toLocaleString(),
-              change: null
+              change: undefined
             },
             {
               id: "ga4-revenue",
               label: "Revenue",
               value: `£${Math.round(revenueYesterday).toLocaleString()}`,
-              change: null
+              change: undefined
             }
           ]
         }
