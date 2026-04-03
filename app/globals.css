@@ -94,7 +94,7 @@ body {
 }
 
 .tsl-login-intro--hide {
-  animation: tslIntroBackdropOut 220ms ease forwards;
+  animation: tslIntroBackdropOut 3000ms ease forwards;
 }
 
 .tsl-login-intro-background {

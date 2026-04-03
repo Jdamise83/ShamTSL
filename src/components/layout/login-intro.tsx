@@ -5,8 +5,8 @@ import { useSearchParams } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
-const INTRO_VISIBLE_MS = 2000;
-const INTRO_HIDE_MS = 220;
+const INTRO_HOLD_MS = 5000;
+const INTRO_FADE_MS = 3000;
 
 interface LoginIntroProps {
   welcomeName: string;
@@ -36,14 +36,14 @@ export function LoginIntro({ welcomeName }: LoginIntroProps) {
 
     const hideTimer = window.setTimeout(() => {
       setState("hide");
-    }, INTRO_VISIBLE_MS - INTRO_HIDE_MS);
+    }, INTRO_HOLD_MS);
 
     const removeTimer = window.setTimeout(() => {
       setState("hidden");
       const url = new URL(window.location.href);
       url.searchParams.delete("intro");
       window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-    }, INTRO_VISIBLE_MS);
+    }, INTRO_HOLD_MS + INTRO_FADE_MS);
 
     return () => {
       window.clearTimeout(hideTimer);
