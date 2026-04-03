@@ -174,6 +174,16 @@ async function fetchSupabaseEvents(start?: string, end?: string, filters?: Calen
 }
 
 export const calendarService = {
+  async getUpcomingByType(eventType: CalendarEventType, limit = 3) {
+    const events = await this.listEvents();
+    const now = new Date();
+
+    return events
+      .filter((event) => event.eventType === eventType && parseISO(event.endsAt) > now)
+      .sort((a, b) => parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime())
+      .slice(0, limit);
+  },
+
   async listEvents({ start, end, filters }: { start?: string; end?: string; filters?: CalendarFilters } = {}) {
     const supabaseEvents = await fetchSupabaseEvents(start, end, filters);
     if (supabaseEvents) {
@@ -209,11 +219,15 @@ export const calendarService = {
   },
 
   async getUpcomingMeetings(limit = 5) {
-    const events = await this.listEvents();
-    const now = new Date();
-    return events
-      .filter((event) => event.eventType === "meeting" && parseISO(event.endsAt) > now)
-      .slice(0, limit);
+    return this.getUpcomingByType("meeting", limit);
+  },
+
+  async getUpcomingEvents(limit = 3) {
+    return this.getUpcomingByType("event", limit);
+  },
+
+  async getUpcomingTasks(limit = 3) {
+    return this.getUpcomingByType("task", limit);
   },
 
   async createEvent(input: CalendarEventInput, actorId: string) {

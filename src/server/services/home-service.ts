@@ -9,12 +9,14 @@ import { holidayService } from "@/server/services/holiday-service";
 
 export const homeService = {
   async getOverview() {
-    const [ads, seo, ga4, unleashed, meetings, holiday] = await Promise.all([
+    const [ads, seo, ga4, unleashed, meetings, upcomingEvents, upcomingTasks, holiday] = await Promise.all([
       googleAdsService.getDashboardData(),
       seoService.getDashboardData(),
       ga4Service.getDashboardData(),
       unleashedService.getDashboardData(),
-      calendarService.getUpcomingMeetings(5),
+      calendarService.getUpcomingMeetings(3),
+      calendarService.getUpcomingEvents(3),
+      calendarService.getUpcomingTasks(3),
       holidayService.getDashboardData()
     ]);
 
@@ -27,6 +29,8 @@ export const homeService = {
       ],
 
       upcomingMeetings: meetings,
+      upcomingEvents,
+      upcomingTasks,
 
       holidaySummary: holiday.summary,
 

@@ -30,6 +30,21 @@ function getFirstName(value: string) {
   return parts.length > 0 ? parts[0] : "";
 }
 
+function resolveSignedInName(email: string) {
+  const localPart = (email.split("@")[0] ?? "").trim();
+  const firstToken = localPart.split(/[._-]/).filter(Boolean)[0] ?? localPart;
+
+  if (!firstToken) {
+    return "User";
+  }
+
+  if (firstToken.toLowerCase() === "info") {
+    return "info";
+  }
+
+  return firstToken.charAt(0).toUpperCase() + firstToken.slice(1);
+}
+
 function deriveNameFromEmail(email: string) {
   const localPart = email.split("@")[0] ?? "";
   const normalizedLocal = localPart.toLowerCase();
@@ -105,6 +120,7 @@ export default async function ProtectedLayout({
     profileFullName: profile?.full_name ?? null,
     metadataFullName
   });
+  const signedInName = resolveSignedInName(user.email ?? "");
 
   return (
     <div className="min-h-screen lg:flex">
@@ -117,7 +133,7 @@ export default async function ProtectedLayout({
             <div className="tsl-page-watermark" />
           </div>
           <div className="relative z-10">
-            <TopBar userEmail={user.email ?? "admin"} onSignOut={signOutAction} />
+            <TopBar signedInName={signedInName} onSignOut={signOutAction} />
             {children}
           </div>
         </main>

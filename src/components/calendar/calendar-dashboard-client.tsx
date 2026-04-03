@@ -6,7 +6,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import type { DateClickArg, EventResizeDoneArg } from "@fullcalendar/interaction";
-import type { EventClickArg, EventDropArg, EventInput } from "@fullcalendar/core";
+import type { EventClickArg, EventContentArg, EventDropArg, EventInput } from "@fullcalendar/core";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
 import { EmptyState } from "@/components/dashboard/empty-state";
@@ -67,6 +67,53 @@ const nonMeetingColorMap: Record<Exclude<CalendarEventType, "meeting">, { bg: st
   event: { bg: "#f8d7da", border: "#ef9a9a", text: "#7b2323" },
   task: { bg: "#fff5cc", border: "#e3cc79", text: "#5d4c10" }
 };
+
+function getDynamicEventTitleFontSize(title: string) {
+  const length = title.trim().length;
+
+  if (length <= 12) {
+    return "1rem";
+  }
+
+  if (length <= 20) {
+    return "0.9rem";
+  }
+
+  if (length <= 30) {
+    return "0.82rem";
+  }
+
+  if (length <= 42) {
+    return "0.74rem";
+  }
+
+  return "0.68rem";
+}
+
+function renderCalendarEventContent(argument: EventContentArg) {
+  const titleSize = getDynamicEventTitleFontSize(argument.event.title ?? "");
+
+  return (
+    <div className="flex h-full w-full flex-col overflow-hidden leading-tight">
+      {argument.timeText ? (
+        <span className="truncate font-semibold" style={{ fontSize: "0.68rem", lineHeight: 1.1 }}>
+          {argument.timeText}
+        </span>
+      ) : null}
+      <span
+        className="font-semibold"
+        style={{
+          fontSize: titleSize,
+          lineHeight: 1.12,
+          overflowWrap: "anywhere",
+          wordBreak: "break-word"
+        }}
+      >
+        {argument.event.title}
+      </span>
+    </div>
+  );
+}
 
 function toLocalInputValue(isoDate: string) {
   const date = new Date(isoDate);
@@ -579,6 +626,10 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
               eventResize={handleEventResize}
               dateClick={handleDateClick}
               eventClick={handleEventClick}
+              eventContent={renderCalendarEventContent}
+              eventDidMount={(info) => {
+                info.el.title = info.event.title;
+              }}
               events={calendarEvents}
               slotMinTime="06:00:00"
               slotMaxTime="22:00:00"
