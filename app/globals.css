@@ -32,6 +32,124 @@ body {
   @apply bg-background text-foreground font-sans antialiased;
 }
 
+@keyframes tslIntroBackdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tslIntroBackdropOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes tslIntroPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tslIntroGlow {
+  0%,
+  100% {
+    filter: drop-shadow(0 16px 40px rgba(16, 26, 46, 0.25));
+  }
+  50% {
+    filter: drop-shadow(0 22px 56px rgba(16, 26, 46, 0.38));
+  }
+}
+
+@keyframes tslIntroImageFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+.tsl-login-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background:
+    radial-gradient(ellipse at top, rgba(52, 139, 255, 0.42), transparent 58%),
+    radial-gradient(ellipse at bottom, rgba(15, 31, 59, 0.9), rgba(8, 15, 28, 0.97));
+  backdrop-filter: blur(8px);
+  animation: tslIntroBackdropIn 450ms ease both;
+}
+
+.tsl-login-intro--hide {
+  animation: tslIntroBackdropOut 450ms ease forwards;
+}
+
+.tsl-login-intro-panel {
+  width: min(960px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  animation: tslIntroPanelIn 520ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.tsl-login-intro-greeting {
+  margin: 0;
+  font-family: "Snell Roundhand", "Brush Script MT", "Segoe Script", cursive;
+  font-size: clamp(2.6rem, 8vw, 6rem);
+  line-height: 0.95;
+  color: #ffffff;
+  text-align: center;
+  text-shadow:
+    0 3px 12px rgba(8, 15, 28, 0.55),
+    0 0 44px rgba(75, 182, 255, 0.28);
+}
+
+.tsl-login-intro-greeting span {
+  color: #d3edff;
+}
+
+.tsl-login-intro-image {
+  width: min(560px, 92vw);
+  height: auto;
+  max-height: min(72vh, 860px);
+  object-fit: contain;
+  animation:
+    tslIntroGlow 2200ms ease-in-out infinite,
+    tslIntroImageFloat 2900ms ease-in-out infinite;
+}
+
+@media (max-width: 768px) {
+  .tsl-login-intro {
+    padding: 0.75rem;
+  }
+
+  .tsl-login-intro-panel {
+    gap: 0.7rem;
+  }
+
+  .tsl-login-intro-image {
+    width: min(460px, 96vw);
+    max-height: 70vh;
+  }
+}
+
 .tsl-page-watermark {
   height: 100%;
   width: 100%;

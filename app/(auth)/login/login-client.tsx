@@ -40,7 +40,7 @@ export default function LoginClient() {
       if (authError) {
         setError(authError.message);
       } else {
-        router.replace("/home");
+        router.replace("/home?intro=1");
         router.refresh();
       }
     } catch (unexpectedError) {
