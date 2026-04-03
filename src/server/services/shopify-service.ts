@@ -280,9 +280,17 @@ function getByPath(source: unknown, path: string): unknown {
   }, source);
 }
 
+function isShopifyDataPayload(payload: unknown): payload is ShopifyData {
+  if (!isRecord(payload)) {
+    return false;
+  }
+
+  return Array.isArray(payload.kpiGroups) && isRecord(payload.charts) && Array.isArray(payload.tables);
+}
+
 function parseAppPayload(payload: unknown, currency: string): ShopifyData {
-  if (isRecord(payload) && Array.isArray(payload.kpiGroups) && isRecord(payload.charts) && Array.isArray(payload.tables)) {
-    return payload as ShopifyData;
+  if (isShopifyDataPayload(payload)) {
+    return payload;
   }
 
   const periods: PeriodSummary[] = PERIODS.map((period) => ({
