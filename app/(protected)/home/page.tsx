@@ -56,7 +56,7 @@ export default async function HomePage() {
 
       <section className="space-y-3">
         <RangeLabel label="Overview Snapshot" />
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-2">
           {data.topKpis.map((kpi) => (
             <KpiCard key={kpi.id} metric={kpi} />
           ))}

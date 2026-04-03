@@ -3,7 +3,7 @@ import "server-only";
 import type { LinePoint } from "@/types/dashboard";
 import type { ShopifyData } from "@/types/integrations";
 
-type PeriodKey = "day" | "last7" | "mtd";
+type PeriodKey = "day" | "last7" | "mtd" | "ytd";
 
 interface PeriodSummary {
   key: PeriodKey;
@@ -82,7 +82,8 @@ interface GraphqlOrdersResponse {
 const PERIODS: Array<{ key: PeriodKey; label: string }> = [
   { key: "day", label: "Day" },
   { key: "last7", label: "Last 7 days" },
-  { key: "mtd", label: "Month to date" }
+  { key: "mtd", label: "Month to date" },
+  { key: "ytd", label: "YTD" }
 ];
 
 const DEFAULT_TIMEOUT_MS = 12_000;
@@ -144,9 +145,10 @@ function getBoundaries(now = new Date()) {
   const last7Start = new Date(dayStart);
   last7Start.setUTCDate(last7Start.getUTCDate() - 6);
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const fetchStart = new Date(Math.min(last7Start.getTime(), monthStart.getTime()));
+  const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  const fetchStart = new Date(Math.min(last7Start.getTime(), monthStart.getTime(), yearStart.getTime()));
 
-  return { now, dayStart, last7Start, monthStart, fetchStart };
+  return { now, dayStart, last7Start, monthStart, yearStart, fetchStart };
 }
 
 function blankData(): ShopifyData {
@@ -325,6 +327,8 @@ function parseAppPayload(payload: unknown, currency: string): ShopifyData {
             ? "last7"
             : rawKey === "mtd" || rawKey === "month" || rawKey === "month_to_date"
               ? "mtd"
+              : rawKey === "ytd" || rawKey === "year" || rawKey === "year_to_date" || rawKey === "this_year"
+                ? "ytd"
               : null;
 
       if (!period) {
@@ -374,7 +378,7 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 
 async function fetchFromAppEndpoint(config: AppEndpointConfig): Promise<ShopifyData> {
   const url = new URL(config.endpoint);
-  url.searchParams.set("periods", "day,last7,mtd");
+  url.searchParams.set("periods", "day,last7,mtd,ytd");
 
   const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
   const response = await fetchWithTimeout(
@@ -544,7 +548,7 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
 }
 
 function aggregate(orders: ShopifyOrder[]): PeriodSummary[] {
-  const { now, dayStart, last7Start, monthStart } = getBoundaries();
+  const { now, dayStart, last7Start, monthStart, yearStart } = getBoundaries();
 
   const summary = new Map<PeriodKey, PeriodSummary>(
     PERIODS.map((period) => [
@@ -580,6 +584,14 @@ function aggregate(orders: ShopifyOrder[]): PeriodSummary[] {
       if (mtd) {
         mtd.orders += 1;
         mtd.revenue += order.revenue;
+      }
+    }
+
+    if (createdAt >= yearStart) {
+      const ytd = summary.get("ytd");
+      if (ytd) {
+        ytd.orders += 1;
+        ytd.revenue += order.revenue;
       }
     }
   }

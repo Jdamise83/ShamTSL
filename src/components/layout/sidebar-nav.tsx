@@ -42,7 +42,7 @@ export function SidebarNav({ role }: { role: SidebarRole }) {
   const navigation = allNavigation.filter((item) => item.roles.includes(role));
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-72 border-r border-white/15 bg-[#1f4f8f] px-5 py-8 text-white lg:block">
+    <aside className="sticky top-0 hidden h-screen w-72 border-r border-white/15 bg-[#0396FF] px-5 py-8 text-white lg:block">
       <div className="mb-10 px-2">
         <img
           src="https://cdn.shopify.com/s/files/1/0991/4689/1610/files/new_thesnuslife_logotype.svg?v=1775047239"

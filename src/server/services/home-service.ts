@@ -39,6 +39,80 @@ const EMPTY_GA4_DATA: Ga4Data = EMPTY_PERFORMANCE_DATA;
 const EMPTY_SHOPIFY_DATA: ShopifyData = EMPTY_PERFORMANCE_DATA;
 const EMPTY_UNLEASHED_DATA: UnleashedData = EMPTY_PERFORMANCE_DATA;
 
+type OverviewPeriod = {
+  id: "day" | "mtd" | "ytd";
+  label: "Day" | "MTD" | "YTD";
+  unleashedLabelToken: string;
+  shopifyRowToken: string;
+};
+
+const OVERVIEW_PERIODS: OverviewPeriod[] = [
+  { id: "day", label: "Day", unleashedLabelToken: "day", shopifyRowToken: "day" },
+  { id: "mtd", label: "MTD", unleashedLabelToken: "month", shopifyRowToken: "month" },
+  { id: "ytd", label: "YTD", unleashedLabelToken: "ytd", shopifyRowToken: "ytd" }
+];
+
+function toNumber(value: string | number | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function extractUnleashedTotals(unleashed: UnleashedData, labelToken: string) {
+  const group = unleashed.kpiGroups.find((item) =>
+    item.label.toLowerCase().includes(labelToken.toLowerCase())
+  );
+
+  if (!group) {
+    return { revenue: 0, profit: 0 };
+  }
+
+  const revenueMetric = group.metrics.find((metric) => metric.label.toLowerCase().includes("revenue"));
+  const profitMetric = group.metrics.find((metric) => metric.label.toLowerCase().includes("profit"));
+
+  return {
+    revenue: toNumber(revenueMetric?.value),
+    profit: toNumber(profitMetric?.value)
+  };
+}
+
+function extractShopifyRevenueByPeriod(shopify: ShopifyData, periodToken: string) {
+  const financialTable =
+    shopify.tables.find((table) => table.key.toLowerCase().includes("financial")) ??
+    shopify.tables.find((table) => table.title.toLowerCase().includes("financial"));
+
+  if (!financialTable) {
+    return 0;
+  }
+
+  const row = financialTable.rows.find((item) => {
+    const periodValue = String(item.period ?? item.Period ?? "").toLowerCase();
+    return periodValue.includes(periodToken.toLowerCase());
+  });
+
+  if (!row) {
+    return 0;
+  }
+
+  return toNumber(String(row.revenue ?? row.Revenue ?? 0));
+}
+
 export const homeService = {
   async getOverview() {
     const [
@@ -104,17 +178,37 @@ export const homeService = {
     const monthGroup =
       unleashed.kpiGroups.find((group) => group.label.toLowerCase().includes("month")) ??
       unleashed.kpiGroups[unleashed.kpiGroups.length - 1];
-    const shopifyMonthGroup =
-      shopify.kpiGroups.find((group) => group.label.toLowerCase().includes("month")) ??
-      shopify.kpiGroups[shopify.kpiGroups.length - 1];
+
+    const combinedTopKpis = OVERVIEW_PERIODS.flatMap((period) => {
+      const unleashedTotals = extractUnleashedTotals(unleashed, period.unleashedLabelToken);
+      const shopifyRevenue = extractShopifyRevenueByPeriod(shopify, period.shopifyRowToken);
+      const combinedRevenue = unleashedTotals.revenue + shopifyRevenue;
+      const combinedProfit = unleashedTotals.profit + shopifyRevenue * 0.5;
+
+      return [
+        {
+          id: `${period.id}-revenue`,
+          label: `${period.label} Revenue`,
+          value: formatCurrency(combinedRevenue),
+          helperText: "Shopify + Unleashed"
+        },
+        {
+          id: `${period.id}-profit`,
+          label: `${period.label} Profit`,
+          value: formatCurrency(combinedProfit),
+          helperText: "Unleashed profit + 50% Shopify revenue"
+        }
+      ];
+    });
+
+    const ga4RevenueMetric =
+      ga4.kpiGroups[0]?.metrics.find((metric) => metric.id === "ga4-revenue") ??
+      ga4.kpiGroups[0]?.metrics.find((metric) => metric.label.toLowerCase().includes("revenue"));
+
+    const shopifyMtdRevenue = extractShopifyRevenueByPeriod(shopify, "month");
 
     return {
-      topKpis: [
-        { id: "today", label: "Today", value: "£24,300", change: { value: 4.6, direction: "up" as const } },
-        { id: "wtd", label: "WTD", value: "£158,200", change: { value: 6.1, direction: "up" as const } },
-        { id: "mtd", label: "MTD", value: "£672,400", change: { value: 7.4, direction: "up" as const } },
-        { id: "ytd", label: "YTD", value: "£7.4M", change: { value: 11.2, direction: "up" as const } }
-      ],
+      topKpis: combinedTopKpis,
 
       upcomingMeetings: meetings,
       upcomingEvents,
@@ -141,21 +235,13 @@ export const homeService = {
         {
           id: "ga4",
           label: "GA4",
-          value:
-            ga4.kpiGroups[0]?.metrics.find((metric) => metric.id === "ga4-active-users")?.value ??
-            "-",
-          helper: `${
-            ga4.kpiGroups[0]?.metrics.find((metric) => metric.id === "ga4-sessions")?.value ?? "-"
-          } sessions | ${
-            ga4.kpiGroups[0]?.metrics.find((metric) => metric.id === "ga4-revenue")?.value ?? "-"
-          }`
+          value: ga4RevenueMetric?.value ?? "-",
+          helper: "Last 30D Revenue"
         },
         {
           id: "shopify",
           label: "Shopify",
-          value:
-            shopifyMonthGroup?.metrics.find((metric) => metric.label.toLowerCase() === "revenue")?.value ??
-            "-",
+          value: formatCurrency(shopifyMtdRevenue),
           helper: "Month to date Revenue"
         },
 
