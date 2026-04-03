@@ -19,6 +19,9 @@ export const homeService = {
       calendarService.getUpcomingTasks(3),
       holidayService.getDashboardData()
     ]);
+    const monthGroup =
+      unleashed.kpiGroups.find((group) => group.label.toLowerCase().includes("month")) ??
+      unleashed.kpiGroups[unleashed.kpiGroups.length - 1];
 
     return {
       topKpis: [
@@ -67,9 +70,9 @@ export const homeService = {
           id: "unleashed",
           label: "Unleashed",
           value:
-            unleashed.kpiGroups[1]?.metrics.find((metric) => metric.label === "Gross Profit")?.value ??
+            monthGroup?.metrics.find((metric) => metric.label.toLowerCase().includes("profit"))?.value ??
             "-",
-          helper: "MTD Gross Profit"
+          helper: "Month to date Total Profit"
         }
       ]
     };

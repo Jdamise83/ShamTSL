@@ -7,9 +7,10 @@ export default async function UnleashedPage() {
   return (
     <PerformanceModuleView
       title="Unleashed"
-      description="Commercial sales and profit dashboard across WTD, MTD, and YTD windows."
+      description="Commercial revenue and total profit dashboard across day, week-to-date, and month-to-date windows."
       data={data}
       splitTitle="Sales Mix"
+      valuePrefix="£"
     />
   );
 }

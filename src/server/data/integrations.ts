@@ -461,114 +461,88 @@ export const ga4MockData: Ga4Data = {
 export const unleashedMockData: UnleashedData = {
   kpiGroups: [
     {
-      id: "wtd",
-      label: "WTD",
+      id: "day",
+      label: "Day",
       metrics: [
-        { id: "sales_wtd", label: "Sales", value: "£188,400", change: { value: 7.1, direction: "up" } },
         {
-          id: "gross_wtd",
-          label: "Gross Profit",
-          value: "£84,200",
-          change: { value: 6.2, direction: "up" }
+          id: "revenue_day",
+          label: "Revenue",
+          value: "£12,940",
+          change: { value: 4.1, direction: "up" }
         },
-        { id: "margin_wtd", label: "Margin", value: "44.7%", change: { value: 1.4, direction: "up" } },
-        { id: "orders_wtd", label: "Orders", value: "2,190", change: { value: 4.4, direction: "up" } },
-        { id: "aov_wtd", label: "Average Order Value", value: "£86", change: { value: 2.5, direction: "up" } },
-        { id: "units_wtd", label: "Units Sold", value: "11,840", change: { value: 5.8, direction: "up" } }
+        {
+          id: "profit_day",
+          label: "Total Profit",
+          value: "£5,460",
+          change: { value: 3.6, direction: "up" }
+        }
       ]
     },
     {
-      id: "mtd",
-      label: "MTD",
+      id: "week",
+      label: "Week to date",
       metrics: [
-        { id: "sales_mtd", label: "Sales", value: "£740,200", change: { value: 8.6, direction: "up" } },
         {
-          id: "gross_mtd",
-          label: "Gross Profit",
-          value: "£323,100",
-          change: { value: 7.9, direction: "up" }
+          id: "revenue_week",
+          label: "Revenue",
+          value: "£91,800",
+          change: { value: 6.4, direction: "up" }
         },
-        { id: "margin_mtd", label: "Margin", value: "43.6%", change: { value: 1.1, direction: "up" } },
-        { id: "orders_mtd", label: "Orders", value: "8,530", change: { value: 6.2, direction: "up" } },
-        { id: "aov_mtd", label: "Average Order Value", value: "£87", change: { value: 2.1, direction: "up" } },
-        { id: "units_mtd", label: "Units Sold", value: "45,900", change: { value: 7.3, direction: "up" } }
+        {
+          id: "profit_week",
+          label: "Total Profit",
+          value: "£39,300",
+          change: { value: 5.7, direction: "up" }
+        }
       ]
     },
     {
-      id: "ytd",
-      label: "YTD",
+      id: "month",
+      label: "Month to date",
       metrics: [
-        { id: "sales_ytd", label: "Sales", value: "£8.4M", change: { value: 12.2, direction: "up" } },
         {
-          id: "gross_ytd",
-          label: "Gross Profit",
-          value: "£3.6M",
-          change: { value: 11.4, direction: "up" }
+          id: "revenue_month",
+          label: "Revenue",
+          value: "£396,500",
+          change: { value: 8.1, direction: "up" }
         },
-        { id: "margin_ytd", label: "Margin", value: "42.8%", change: { value: 0.8, direction: "up" } },
-        { id: "orders_ytd", label: "Orders", value: "94,300", change: { value: 9.1, direction: "up" } },
-        { id: "aov_ytd", label: "Average Order Value", value: "£89", change: { value: 2.7, direction: "up" } },
-        { id: "units_ytd", label: "Units Sold", value: "492,700", change: { value: 10.1, direction: "up" } }
+        {
+          id: "profit_month",
+          label: "Total Profit",
+          value: "£171,200",
+          change: { value: 7.3, direction: "up" }
+        }
       ]
     }
   ],
   charts: {
     trend: [
-      { label: "Jan", value: 2.3 },
-      { label: "Feb", value: 2.6 },
-      { label: "Mar", value: 2.8 },
-      { label: "Apr", value: 3.1 }
+      { label: "Day", value: 12940 },
+      { label: "WTD", value: 91800 },
+      { label: "MTD", value: 396500 }
     ],
     split: [
-      { label: "DTC", value: 57 },
-      { label: "Wholesale", value: 32 },
-      { label: "Marketplace", value: 11 }
+      { label: "Revenue", value: 70 },
+      { label: "Total Profit", value: 30 }
     ]
   },
   tables: [
     {
-      key: "sales-by-channel",
-      title: "Sales By Channel",
+      key: "financial-performance",
+      title: "Financial Performance",
       rows: [
-        { channel: "DTC", sales: "£4.8M", orders: 58100, margin: "44.1%" },
-        { channel: "Wholesale", sales: "£2.7M", orders: 22300, margin: "39.6%" },
-        { channel: "Marketplace", sales: "£0.9M", orders: 13900, margin: "33.2%" }
+        { period: "Day", revenue: "£12,940", totalProfit: "£5,460", profitMargin: "42.2%" },
+        { period: "Week to date", revenue: "£91,800", totalProfit: "£39,300", profitMargin: "42.8%" },
+        { period: "Month to date", revenue: "£396,500", totalProfit: "£171,200", profitMargin: "43.2%" }
       ]
     },
     {
-      key: "sales-by-product",
-      title: "Sales By Product",
+      key: "revenue-by-channel",
+      title: "Revenue by Channel",
       rows: [
-        { product: "Starter Bundle", sales: "£1.84M", units: 103200 },
-        { product: "Mint Slim", sales: "£1.31M", units: 84400 },
-        { product: "Freeze Strong", sales: "£1.18M", units: 77100 }
-      ]
-    },
-    {
-      key: "sales-by-brand",
-      title: "Sales By Brand",
-      rows: [
-        { brand: "The Snus Life", sales: "£6.2M", grossProfit: "£2.9M" },
-        { brand: "Nordic Editions", sales: "£1.6M", grossProfit: "£0.5M" },
-        { brand: "Trial Packs", sales: "£0.6M", grossProfit: "£0.2M" }
-      ]
-    },
-    {
-      key: "profit-by-channel",
-      title: "Profit By Channel",
-      rows: [
-        { channel: "DTC", grossProfit: "£2.1M", margin: "44.1%" },
-        { channel: "Wholesale", grossProfit: "£1.1M", margin: "39.6%" },
-        { channel: "Marketplace", grossProfit: "£0.3M", margin: "33.2%" }
-      ]
-    },
-    {
-      key: "profit-by-product",
-      title: "Profit By Product",
-      rows: [
-        { product: "Starter Bundle", grossProfit: "£0.81M", margin: "43.9%" },
-        { product: "Mint Slim", grossProfit: "£0.58M", margin: "44.3%" },
-        { product: "Freeze Strong", grossProfit: "£0.49M", margin: "41.5%" }
+        { channel: "DTC", revenue: "£245,700", totalProfit: "£108,900" },
+        { channel: "Wholesale", revenue: "£112,400", totalProfit: "£45,800" },
+        { channel: "Marketplace", revenue: "£38,400", totalProfit: "£16,500" }
       ]
     }
   ]
