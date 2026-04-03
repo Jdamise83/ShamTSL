@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
 const INTRO_VISIBLE_MS = 2000;
-const INTRO_HIDE_MS = 320;
+const INTRO_HIDE_MS = 220;
 
 interface LoginIntroProps {
   welcomeName: string;
@@ -16,6 +16,7 @@ type IntroState = "hidden" | "show" | "hide";
 
 export function LoginIntro({ welcomeName }: LoginIntroProps) {
   const searchParams = useSearchParams();
+  const hasStartedRef = useRef(false);
   const [state, setState] = useState<IntroState>("hidden");
 
   const shouldShow = searchParams.get("intro") === "1";
@@ -26,23 +27,23 @@ export function LoginIntro({ welcomeName }: LoginIntroProps) {
   }, [welcomeName]);
 
   useEffect(() => {
-    if (!shouldShow) {
+    if (!shouldShow || hasStartedRef.current) {
       return;
     }
+    hasStartedRef.current = true;
 
     setState("show");
 
-    const url = new URL(window.location.href);
-    url.searchParams.delete("intro");
-    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-
     const hideTimer = window.setTimeout(() => {
       setState("hide");
-    }, INTRO_VISIBLE_MS);
+    }, INTRO_VISIBLE_MS - INTRO_HIDE_MS);
 
     const removeTimer = window.setTimeout(() => {
       setState("hidden");
-    }, INTRO_VISIBLE_MS + INTRO_HIDE_MS);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("intro");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+    }, INTRO_VISIBLE_MS);
 
     return () => {
       window.clearTimeout(hideTimer);
@@ -56,16 +57,16 @@ export function LoginIntro({ welcomeName }: LoginIntroProps) {
 
   return (
     <div className={cn("tsl-login-intro", state === "hide" && "tsl-login-intro--hide")}>
+      <img
+        src="/intro-beach-welcome.png"
+        alt="Welcome intro background"
+        className="tsl-login-intro-background"
+        loading="eager"
+      />
       <div className="tsl-login-intro-panel">
         <p className="tsl-login-intro-greeting">
           Hi <span>{safeWelcomeName}</span>
         </p>
-        <img
-          src="/intro-pablo-welcome.png"
-          alt="Pablo welcome visual"
-          className="tsl-login-intro-image"
-          loading="eager"
-        />
       </div>
     </div>
   );
