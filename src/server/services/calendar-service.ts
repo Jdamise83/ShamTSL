@@ -4,23 +4,96 @@ import { formatISO, isAfter, isBefore, parseISO } from "date-fns";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { seededCalendarEvents } from "@/server/data/calendar";
-import type { CalendarEvent, CalendarEventInput, CalendarFilters } from "@/types/calendar";
+import type {
+  CalendarEvent,
+  CalendarEventInput,
+  CalendarEventType,
+  CalendarFilters
+} from "@/types/calendar";
 
 let inMemoryCalendarEvents: CalendarEvent[] = structuredClone(seededCalendarEvents);
+const META_PREFIX = "[[TSL_META]]";
+
+type CalendarEventMeta = {
+  eventType: CalendarEventType;
+  allDay: boolean;
+};
+
+function normalizeEventMeta(input: Partial<CalendarEventMeta> | null | undefined): CalendarEventMeta {
+  const eventType =
+    input?.eventType === "event" || input?.eventType === "task" || input?.eventType === "meeting"
+      ? input.eventType
+      : "meeting";
+  const defaultAllDay = eventType === "event" || eventType === "task";
+  const allDay = typeof input?.allDay === "boolean" ? input.allDay : defaultAllDay;
+
+  return { eventType, allDay };
+}
+
+function parseInternalNotesWithMeta(internalNotes: string | null | undefined): {
+  internalNotes: string | null;
+  meta: CalendarEventMeta;
+} {
+  if (!internalNotes) {
+    return {
+      internalNotes: null,
+      meta: normalizeEventMeta(undefined)
+    };
+  }
+
+  if (!internalNotes.startsWith(META_PREFIX)) {
+    return {
+      internalNotes,
+      meta: normalizeEventMeta(undefined)
+    };
+  }
+
+  const remainder = internalNotes.slice(META_PREFIX.length).trimStart();
+  const firstNewlineIndex = remainder.indexOf("\n");
+  const encodedMeta = firstNewlineIndex === -1 ? remainder : remainder.slice(0, firstNewlineIndex);
+  const plainNotes =
+    firstNewlineIndex === -1 ? "" : remainder.slice(firstNewlineIndex + 1).trim();
+
+  try {
+    const parsedMeta = JSON.parse(encodedMeta) as Partial<CalendarEventMeta>;
+    return {
+      internalNotes: plainNotes || null,
+      meta: normalizeEventMeta(parsedMeta)
+    };
+  } catch {
+    return {
+      internalNotes,
+      meta: normalizeEventMeta(undefined)
+    };
+  }
+}
+
+function serializeInternalNotesWithMeta(
+  internalNotes: string | undefined,
+  metaInput: Partial<CalendarEventMeta>
+) {
+  const meta = normalizeEventMeta(metaInput);
+  const plainNotes = internalNotes?.trim() ?? "";
+  const encodedMeta = JSON.stringify(meta);
+  return `${META_PREFIX}${encodedMeta}${plainNotes ? `\n${plainNotes}` : ""}`;
+}
 
 function displayNameFromEmail(email: string) {
   return email.split("@")[0].replace(/[._-]/g, " ");
 }
 
 function mapEventRow(row: any): CalendarEvent {
+  const parsed = parseInternalNotesWithMeta(row.internal_notes);
   return {
     id: row.id,
+    eventType: parsed.meta.eventType,
     title: row.title,
     description: row.description,
     location: row.location,
     meetingLink: row.meeting_link,
-    internalNotes: row.internal_notes,
+    internalNotes: parsed.internalNotes,
     status: row.status,
+    allDay: parsed.meta.allDay,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     createdBy: row.created_by,
@@ -43,8 +116,9 @@ function filterByDateRange(events: CalendarEvent[], start?: string, end?: string
     }
 
     const eventStart = parseISO(event.startsAt);
+    const eventEnd = parseISO(event.endsAt);
 
-    if (start && isBefore(eventStart, parseISO(start))) {
+    if (start && isBefore(eventEnd, parseISO(start))) {
       return false;
     }
 
@@ -61,7 +135,9 @@ function filterByStatuses(events: CalendarEvent[], filters?: CalendarFilters) {
     return events;
   }
 
-  return events.filter((event) => filters.statuses.includes(event.status));
+  return events.filter((event) =>
+    event.eventType === "meeting" ? filters.statuses.includes(event.status) : true
+  );
 }
 
 async function fetchSupabaseEvents(start?: string, end?: string, filters?: CalendarFilters) {
@@ -135,11 +211,17 @@ export const calendarService = {
   async getUpcomingMeetings(limit = 5) {
     const events = await this.listEvents();
     const now = new Date();
-    return events.filter((event) => parseISO(event.endsAt) > now).slice(0, limit);
+    return events
+      .filter((event) => event.eventType === "meeting" && parseISO(event.endsAt) > now)
+      .slice(0, limit);
   },
 
   async createEvent(input: CalendarEventInput, actorId: string) {
     const admin = createSupabaseAdminClient();
+    const normalizedMeta = normalizeEventMeta({
+      eventType: input.eventType,
+      allDay: input.allDay
+    });
 
     if (admin) {
       const { data: eventRow, error: eventError } = await admin
@@ -149,7 +231,7 @@ export const calendarService = {
           description: input.description ?? null,
           location: input.location ?? null,
           meeting_link: input.meetingLink ?? null,
-          internal_notes: input.internalNotes ?? null,
+          internal_notes: serializeInternalNotesWithMeta(input.internalNotes, normalizedMeta),
           status: input.status,
           starts_at: input.startsAt,
           ends_at: input.endsAt,
@@ -191,12 +273,14 @@ export const calendarService = {
 
     const created: CalendarEvent = {
       id,
+      eventType: normalizedMeta.eventType,
       title: input.title,
       description: input.description ?? null,
       location: input.location ?? null,
       meetingLink: input.meetingLink ?? null,
       internalNotes: input.internalNotes ?? null,
       status: input.status,
+      allDay: normalizedMeta.allDay,
       startsAt: input.startsAt,
       endsAt: input.endsAt,
       createdBy: actorId,
@@ -220,6 +304,10 @@ export const calendarService = {
 
   async updateEvent(eventId: string, input: CalendarEventInput) {
     const admin = createSupabaseAdminClient();
+    const normalizedMeta = normalizeEventMeta({
+      eventType: input.eventType,
+      allDay: input.allDay
+    });
 
     if (admin) {
       const { error: updateError } = await admin
@@ -229,7 +317,7 @@ export const calendarService = {
           description: input.description ?? null,
           location: input.location ?? null,
           meeting_link: input.meetingLink ?? null,
-          internal_notes: input.internalNotes ?? null,
+          internal_notes: serializeInternalNotesWithMeta(input.internalNotes, normalizedMeta),
           status: input.status,
           starts_at: input.startsAt,
           ends_at: input.endsAt,
@@ -278,12 +366,14 @@ export const calendarService = {
       event.id === eventId
         ? {
             ...event,
+            eventType: normalizedMeta.eventType,
             title: input.title,
             description: input.description ?? null,
             location: input.location ?? null,
             meetingLink: input.meetingLink ?? null,
             internalNotes: input.internalNotes ?? null,
             status: input.status,
+            allDay: normalizedMeta.allDay,
             startsAt: input.startsAt,
             endsAt: input.endsAt,
             updatedAt: formatISO(new Date()),
@@ -319,6 +409,8 @@ export const calendarService = {
       meetingLink: event.meetingLink ?? undefined,
       internalNotes: event.internalNotes ?? undefined,
       status: event.status,
+      eventType: event.eventType,
+      allDay: event.allDay,
       startsAt,
       endsAt,
       attendeeEmails: event.attendees.map((attendee) => attendee.email)

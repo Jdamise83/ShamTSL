@@ -1,4 +1,5 @@
 export type MeetingStatus = "planned" | "confirmed" | "done" | "cancelled";
+export type CalendarEventType = "meeting" | "event" | "task";
 
 export interface CalendarAttendee {
   id: string;
@@ -10,12 +11,14 @@ export interface CalendarAttendee {
 
 export interface CalendarEvent {
   id: string;
+  eventType: CalendarEventType;
   title: string;
   description: string | null;
   location: string | null;
   meetingLink: string | null;
   internalNotes: string | null;
   status: MeetingStatus;
+  allDay: boolean;
   startsAt: string;
   endsAt: string;
   createdBy: string;
@@ -25,12 +28,14 @@ export interface CalendarEvent {
 }
 
 export interface CalendarEventInput {
+  eventType?: CalendarEventType;
   title: string;
   description?: string;
   location?: string;
   meetingLink?: string;
   internalNotes?: string;
   status: MeetingStatus;
+  allDay?: boolean;
   startsAt: string;
   endsAt: string;
   attendeeEmails: string[];
@@ -38,4 +43,5 @@ export interface CalendarEventInput {
 
 export interface CalendarFilters {
   statuses: MeetingStatus[];
+  eventTypes?: CalendarEventType[];
 }

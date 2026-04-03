@@ -9,7 +9,7 @@ export default async function CalendarPage() {
     <div className="space-y-8">
       <SectionHeader
         title="Calendar"
-        description="Operational scheduling with full event lifecycle control and attendee management."
+        description="Operational scheduling for meetings, multi-day events and draggable day tasks."
       />
       <CalendarDashboardClient initialEvents={initialEvents} />
     </div>
