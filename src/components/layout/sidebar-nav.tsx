@@ -10,6 +10,7 @@ import {
   Home,
   Megaphone,
   Search,
+  ShoppingBag,
   Umbrella
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ const allNavigation: NavigationItem[] = [
   { href: "/google-ads", label: "Google Ads", icon: Megaphone, roles: ["admin"] },
   { href: "/seo", label: "SEO", icon: Search, roles: ["admin"] },
   { href: "/ga4", label: "GA4", icon: ChartColumn, roles: ["admin"] },
+  { href: "/shopify", label: "Shopify", icon: ShoppingBag, roles: ["admin"] },
   { href: "/unleashed", label: "Unleashed", icon: Factory, roles: ["admin"] },
   { href: "/settings", label: "Settings", icon: Cog, roles: ["admin"] }
 ];

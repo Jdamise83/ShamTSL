@@ -172,7 +172,7 @@ export default async function HomePage() {
 
       <section className="space-y-3">
         <RangeLabel label="Performance Snapshot" />
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
           {data.moduleSnapshots.map((snapshot) => (
             <Link key={snapshot.id} href={`/${snapshot.id}`}>
               <Card className="h-full border-border/80 bg-card transition-all hover:-translate-y-0.5 hover:shadow-lg">

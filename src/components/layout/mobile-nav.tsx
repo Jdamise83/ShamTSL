@@ -12,6 +12,7 @@ const links = [
   { href: "/google-ads", label: "Ads" },
   { href: "/seo", label: "SEO" },
   { href: "/ga4", label: "GA4" },
+  { href: "/shopify", label: "Shopify" },
   { href: "/unleashed", label: "Unleashed" },
   { href: "/settings", label: "Settings" }
 ];

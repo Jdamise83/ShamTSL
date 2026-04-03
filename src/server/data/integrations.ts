@@ -1,4 +1,10 @@
-import type { Ga4Data, GoogleAdsData, SeoData, UnleashedData } from "@/types/integrations";
+import type {
+  Ga4Data,
+  GoogleAdsData,
+  SeoData,
+  ShopifyData,
+  UnleashedData
+} from "@/types/integrations";
 
 export const googleAdsMockData: GoogleAdsData = {
   kpiGroups: [
@@ -554,6 +560,68 @@ export const unleashedMockData: UnleashedData = {
         { period: "Week to date", revenue: "£91,800", totalProfit: "£39,300", profitMargin: "42.8%" },
         { period: "Month to date", revenue: "£396,500", totalProfit: "£171,200", profitMargin: "43.2%" },
         { period: "YTD", revenue: "£3,482,100", totalProfit: "£1,472,600", profitMargin: "42.3%" }
+      ]
+    }
+  ]
+};
+
+export const shopifyMockData: ShopifyData = {
+  kpiGroups: [
+    {
+      id: "shopify-day",
+      label: "Day",
+      metrics: [
+        { id: "shopify-revenue-day", label: "Revenue", value: "£0.00", change: undefined },
+        { id: "shopify-orders-day", label: "Orders", value: "0", change: undefined },
+        { id: "shopify-aov-day", label: "Average Order Value", value: "£0.00", change: undefined }
+      ]
+    },
+    {
+      id: "shopify-week",
+      label: "Week to date",
+      metrics: [
+        { id: "shopify-revenue-week", label: "Revenue", value: "£64,005.11", change: undefined },
+        { id: "shopify-orders-week", label: "Orders", value: "2,391", change: undefined },
+        { id: "shopify-aov-week", label: "Average Order Value", value: "£26.77", change: undefined }
+      ]
+    },
+    {
+      id: "shopify-month",
+      label: "Month to date",
+      metrics: [
+        { id: "shopify-revenue-month", label: "Revenue", value: "£34,854.01", change: undefined },
+        { id: "shopify-orders-month", label: "Orders", value: "1,268", change: undefined },
+        { id: "shopify-aov-month", label: "Average Order Value", value: "£27.49", change: undefined }
+      ]
+    },
+    {
+      id: "shopify-ytd",
+      label: "YTD",
+      metrics: [
+        { id: "shopify-revenue-ytd", label: "Revenue", value: "£992,615.32", change: undefined },
+        { id: "shopify-orders-ytd", label: "Orders", value: "36,121", change: undefined },
+        { id: "shopify-aov-ytd", label: "Average Order Value", value: "£27.48", change: undefined }
+      ]
+    }
+  ],
+  charts: {
+    trend: [
+      { label: "Day", value: 0 },
+      { label: "WTD", value: 64005 },
+      { label: "MTD", value: 34854 },
+      { label: "YTD", value: 992615 }
+    ],
+    split: []
+  },
+  tables: [
+    {
+      key: "shopify-period-performance",
+      title: "Shopify Revenue Performance",
+      rows: [
+        { Period: "Day", Revenue: "£0.00", Orders: "0", "Average Order Value": "£0.00" },
+        { Period: "Week to date", Revenue: "£64,005.11", Orders: "2,391", "Average Order Value": "£26.77" },
+        { Period: "Month to date", Revenue: "£34,854.01", Orders: "1,268", "Average Order Value": "£27.49" },
+        { Period: "YTD", Revenue: "£992,615.32", Orders: "36,121", "Average Order Value": "£27.48" }
       ]
     }
   ]

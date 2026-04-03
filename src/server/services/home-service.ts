@@ -3,10 +3,11 @@ import "server-only";
 import { googleAdsService } from "@/server/services/google-ads-service";
 import { seoService } from "@/server/services/seo-service";
 import { ga4Service } from "@/server/services/ga4-service";
+import { shopifyService } from "@/server/services/shopify-service";
 import { unleashedService } from "@/server/services/unleashed-service";
 import { calendarService } from "@/server/services/calendar-service";
 import { holidayService } from "@/server/services/holiday-service";
-import type { Ga4Data, GoogleAdsData, SeoData, UnleashedData } from "@/types/integrations";
+import type { Ga4Data, GoogleAdsData, SeoData, ShopifyData, UnleashedData } from "@/types/integrations";
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -35,6 +36,7 @@ const EMPTY_PERFORMANCE_DATA = {
 const EMPTY_ADS_DATA: GoogleAdsData = EMPTY_PERFORMANCE_DATA;
 const EMPTY_SEO_DATA: SeoData = EMPTY_PERFORMANCE_DATA;
 const EMPTY_GA4_DATA: Ga4Data = EMPTY_PERFORMANCE_DATA;
+const EMPTY_SHOPIFY_DATA: ShopifyData = EMPTY_PERFORMANCE_DATA;
 const EMPTY_UNLEASHED_DATA: UnleashedData = EMPTY_PERFORMANCE_DATA;
 
 export const homeService = {
@@ -43,6 +45,7 @@ export const homeService = {
       adsResult,
       seoResult,
       ga4Result,
+      shopifyResult,
       unleashedResult,
       meetingsResult,
       upcomingEventsResult,
@@ -52,6 +55,7 @@ export const homeService = {
       withTimeout(googleAdsService.getDashboardData(), 15000, "Google Ads"),
       withTimeout(seoService.getDashboardData(), 15000, "SEO"),
       withTimeout(ga4Service.getDashboardData(), 15000, "GA4"),
+      withTimeout(shopifyService.getDashboardData(), 15000, "Shopify"),
       withTimeout(unleashedService.getDashboardData(), 15000, "Unleashed"),
       withTimeout(calendarService.getUpcomingMeetings(3), 10000, "Calendar meetings"),
       withTimeout(calendarService.getUpcomingEvents(3), 10000, "Calendar events"),
@@ -62,6 +66,7 @@ export const homeService = {
     const ads = adsResult.status === "fulfilled" ? adsResult.value : EMPTY_ADS_DATA;
     const seo = seoResult.status === "fulfilled" ? seoResult.value : EMPTY_SEO_DATA;
     const ga4 = ga4Result.status === "fulfilled" ? ga4Result.value : EMPTY_GA4_DATA;
+    const shopify = shopifyResult.status === "fulfilled" ? shopifyResult.value : EMPTY_SHOPIFY_DATA;
     const unleashed =
       unleashedResult.status === "fulfilled" ? unleashedResult.value : EMPTY_UNLEASHED_DATA;
     const meetings = meetingsResult.status === "fulfilled" ? meetingsResult.value : [];
@@ -86,6 +91,9 @@ export const homeService = {
     if (ga4Result.status === "rejected") {
       console.error("[Home] GA4 module failed:", ga4Result.reason);
     }
+    if (shopifyResult.status === "rejected") {
+      console.error("[Home] Shopify module failed:", shopifyResult.reason);
+    }
     if (unleashedResult.status === "rejected") {
       console.error("[Home] Unleashed module failed:", unleashedResult.reason);
     }
@@ -96,6 +104,9 @@ export const homeService = {
     const monthGroup =
       unleashed.kpiGroups.find((group) => group.label.toLowerCase().includes("month")) ??
       unleashed.kpiGroups[unleashed.kpiGroups.length - 1];
+    const shopifyMonthGroup =
+      shopify.kpiGroups.find((group) => group.label.toLowerCase().includes("month")) ??
+      shopify.kpiGroups[shopify.kpiGroups.length - 1];
 
     return {
       topKpis: [
@@ -138,6 +149,14 @@ export const homeService = {
           } sessions | ${
             ga4.kpiGroups[0]?.metrics.find((metric) => metric.id === "ga4-revenue")?.value ?? "-"
           }`
+        },
+        {
+          id: "shopify",
+          label: "Shopify",
+          value:
+            shopifyMonthGroup?.metrics.find((metric) => metric.label.toLowerCase() === "revenue")?.value ??
+            "-",
+          helper: "Month to date Revenue"
         },
 
         {
