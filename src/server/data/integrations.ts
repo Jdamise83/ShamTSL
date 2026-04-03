@@ -513,13 +513,32 @@ export const unleashedMockData: UnleashedData = {
           change: { value: 7.3, direction: "up" }
         }
       ]
+    },
+    {
+      id: "ytd",
+      label: "YTD",
+      metrics: [
+        {
+          id: "revenue_ytd",
+          label: "Revenue",
+          value: "£3,482,100",
+          change: { value: 9.4, direction: "up" }
+        },
+        {
+          id: "profit_ytd",
+          label: "Total Profit",
+          value: "£1,472,600",
+          change: { value: 8.9, direction: "up" }
+        }
+      ]
     }
   ],
   charts: {
     trend: [
       { label: "Day", value: 12940 },
       { label: "WTD", value: 91800 },
-      { label: "MTD", value: 396500 }
+      { label: "MTD", value: 396500 },
+      { label: "YTD", value: 3482100 }
     ],
     split: [
       { label: "Revenue", value: 70 },
@@ -533,16 +552,8 @@ export const unleashedMockData: UnleashedData = {
       rows: [
         { period: "Day", revenue: "£12,940", totalProfit: "£5,460", profitMargin: "42.2%" },
         { period: "Week to date", revenue: "£91,800", totalProfit: "£39,300", profitMargin: "42.8%" },
-        { period: "Month to date", revenue: "£396,500", totalProfit: "£171,200", profitMargin: "43.2%" }
-      ]
-    },
-    {
-      key: "revenue-by-channel",
-      title: "Revenue by Channel",
-      rows: [
-        { channel: "DTC", revenue: "£245,700", totalProfit: "£108,900" },
-        { channel: "Wholesale", revenue: "£112,400", totalProfit: "£45,800" },
-        { channel: "Marketplace", revenue: "£38,400", totalProfit: "£16,500" }
+        { period: "Month to date", revenue: "£396,500", totalProfit: "£171,200", profitMargin: "43.2%" },
+        { period: "YTD", revenue: "£3,482,100", totalProfit: "£1,472,600", profitMargin: "42.3%" }
       ]
     }
   ]
