@@ -5,8 +5,8 @@ import { useSearchParams } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
-const INTRO_VISIBLE_MS = 2600;
-const INTRO_HIDE_MS = 450;
+const INTRO_VISIBLE_MS = 2000;
+const INTRO_HIDE_MS = 320;
 
 interface LoginIntroProps {
   welcomeName: string;
