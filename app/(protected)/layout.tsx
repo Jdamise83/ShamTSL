@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
-import { LoginIntro } from "@/components/layout/login-intro";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { TopBar } from "@/components/layout/top-bar";
@@ -17,19 +16,6 @@ async function signOutAction() {
   redirect("/login");
 }
 
-function toTitleCase(text: string) {
-  return text
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
-function getFirstName(value: string) {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  return parts.length > 0 ? parts[0] : "";
-}
-
 function resolveSignedInName(email: string) {
   const localPart = (email.split("@")[0] ?? "").trim();
   const firstToken = localPart.split(/[._-]/).filter(Boolean)[0] ?? localPart;
@@ -43,49 +29,6 @@ function resolveSignedInName(email: string) {
   }
 
   return firstToken.charAt(0).toUpperCase() + firstToken.slice(1);
-}
-
-function deriveNameFromEmail(email: string) {
-  const localPart = email.split("@")[0] ?? "";
-  const normalizedLocal = localPart.toLowerCase();
-
-  if (normalizedLocal === "info") {
-    return "Dylan";
-  }
-
-  return toTitleCase(
-    localPart
-      .replace(/[._-]+/g, " ")
-      .replace(/\d+/g, " ")
-      .trim()
-  );
-}
-
-function resolveWelcomeName({
-  email,
-  profileFullName,
-  metadataFullName
-}: {
-  email: string;
-  profileFullName: string | null;
-  metadataFullName: string | null;
-}) {
-  const emailName = deriveNameFromEmail(email);
-  if (emailName) {
-    return emailName;
-  }
-
-  const profileName = profileFullName ? getFirstName(profileFullName) : "";
-  if (profileName) {
-    return toTitleCase(profileName);
-  }
-
-  const metadataName = metadataFullName ? getFirstName(metadataFullName) : "";
-  if (metadataName) {
-    return toTitleCase(metadataName);
-  }
-
-  return "there";
 }
 
 export default async function ProtectedLayout({
@@ -106,25 +49,13 @@ export default async function ProtectedLayout({
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role,full_name")
-    .eq("id", user.id)
-    .maybeSingle();
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
 
   const role = profile?.role === "staff" ? "staff" : "admin";
-  const metadataFullName =
-    typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
-  const welcomeName = resolveWelcomeName({
-    email: user.email ?? "",
-    profileFullName: profile?.full_name ?? null,
-    metadataFullName
-  });
   const signedInName = resolveSignedInName(user.email ?? "");
 
   return (
     <div className="min-h-screen lg:flex">
-      <LoginIntro welcomeName={welcomeName} />
       <SidebarNav role={role} />
       <div className="flex-1">
         <MobileNav />

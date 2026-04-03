@@ -54,6 +54,13 @@ type PeriodTotals = {
   totalProfit: number;
 };
 
+const UNLEASHED_CACHE_TTL_MS = 5 * 60 * 1000;
+const UNLEASHED_REQUEST_TIMEOUT_MS = 12000;
+const UNLEASHED_FETCH_CONCURRENCY = 6;
+
+let unleashedCachedData: { data: UnleashedData; expiresAt: number } | null = null;
+let unleashedInFlightData: Promise<UnleashedData> | null = null;
+
 export interface UnleashedProvider {
   getDashboardData(): Promise<UnleashedData>;
 }
@@ -199,18 +206,28 @@ class RealUnleashedProvider implements UnleashedProvider {
     const queryString = params.toString();
     const signature = this.signQuery(queryString, config.apiKey);
     const url = `${config.baseUrl}${path}${queryString ? `?${queryString}` : ""}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, UNLEASHED_REQUEST_TIMEOUT_MS);
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "api-auth-id": config.apiId,
-        "api-auth-signature": signature,
-        "client-type": config.clientType
-      },
-      cache: "no-store"
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "api-auth-id": config.apiId,
+          "api-auth-signature": signature,
+          "client-type": config.clientType
+        },
+        cache: "no-store",
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       const body = await response.text();
@@ -220,32 +237,73 @@ class RealUnleashedProvider implements UnleashedProvider {
     return (await response.json()) as T;
   }
 
+  private async runWithConcurrency<T>(
+    tasks: Array<() => Promise<T>>,
+    concurrency = UNLEASHED_FETCH_CONCURRENCY
+  ) {
+    if (!tasks.length) {
+      return [] as T[];
+    }
+
+    const results = new Array<T>(tasks.length);
+    let currentIndex = 0;
+
+    const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
+      while (true) {
+        const taskIndex = currentIndex;
+        currentIndex += 1;
+
+        if (taskIndex >= tasks.length) {
+          break;
+        }
+
+        results[taskIndex] = await tasks[taskIndex]();
+      }
+    });
+
+    await Promise.all(workers);
+    return results;
+  }
+
   private async fetchInvoices(
     config: UnleashedConfig,
     startDate: string,
     endDate: string
   ) {
-    const allItems: UnleashedInvoice[] = [];
+    const firstPage = await this.request<UnleashedListResponse<UnleashedInvoice>>(
+      config,
+      "/Invoices/1",
+      {
+        startDate,
+        endDate,
+        invoiceStatus: "Completed",
+        pageSize: this.pageSize
+      }
+    );
 
-    for (let page = 1; page <= this.maxPages; page += 1) {
-      const response = await this.request<UnleashedListResponse<UnleashedInvoice>>(
-        config,
-        `/Invoices/${page}`,
-        {
+    const allItems = [...(firstPage.Items ?? [])];
+    const totalPagesRaw = this.toNumber(firstPage.Pagination?.NumberOfPages);
+    const totalPages = Math.min(this.maxPages, Math.max(1, totalPagesRaw || 1));
+
+    if (totalPages <= 1) {
+      return allItems;
+    }
+
+    const tasks: Array<() => Promise<UnleashedListResponse<UnleashedInvoice>>> = [];
+    for (let page = 2; page <= totalPages; page += 1) {
+      tasks.push(() =>
+        this.request<UnleashedListResponse<UnleashedInvoice>>(config, `/Invoices/${page}`, {
           startDate,
           endDate,
           invoiceStatus: "Completed",
           pageSize: this.pageSize
-        }
+        })
       );
+    }
 
-      const items = response.Items ?? [];
-      allItems.push(...items);
-
-      const numberOfPages = this.toNumber(response.Pagination?.NumberOfPages);
-      if ((numberOfPages > 0 && page >= numberOfPages) || items.length < this.pageSize) {
-        break;
-      }
+    const pages = await this.runWithConcurrency(tasks);
+    for (const page of pages) {
+      allItems.push(...(page.Items ?? []));
     }
 
     return allItems;
@@ -262,16 +320,42 @@ class RealUnleashedProvider implements UnleashedProvider {
 
     const wantedProductGuids = new Set(productGuids);
 
-    for (let page = 1; page <= this.maxPages; page += 1) {
-      const response = await this.request<UnleashedListResponse<UnleashedProduct>>(
-        config,
-        `/Products/${page}`,
-        {
-          pageSize: this.pageSize
-        }
-      );
+    const firstPage = await this.request<UnleashedListResponse<UnleashedProduct>>(
+      config,
+      "/Products/1",
+      {
+        pageSize: this.pageSize
+      }
+    );
 
-      for (const product of response.Items ?? []) {
+    for (const product of firstPage.Items ?? []) {
+      if (!product.Guid) {
+        continue;
+      }
+      if (wantedProductGuids.has(product.Guid)) {
+        costByProductGuid.set(product.Guid, this.toNumber(product.AverageLandPrice));
+      }
+    }
+
+    const totalPagesRaw = this.toNumber(firstPage.Pagination?.NumberOfPages);
+    const totalPages = Math.min(this.maxPages, Math.max(1, totalPagesRaw || 1));
+
+    if (costByProductGuid.size >= wantedProductGuids.size || totalPages <= 1) {
+      return costByProductGuid;
+    }
+
+    const tasks: Array<() => Promise<UnleashedListResponse<UnleashedProduct>>> = [];
+    for (let page = 2; page <= totalPages; page += 1) {
+      tasks.push(() =>
+        this.request<UnleashedListResponse<UnleashedProduct>>(config, `/Products/${page}`, {
+          pageSize: this.pageSize
+        })
+      );
+    }
+
+    const pages = await this.runWithConcurrency(tasks);
+    for (const page of pages) {
+      for (const product of page.Items ?? []) {
         if (!product.Guid) {
           continue;
         }
@@ -280,14 +364,7 @@ class RealUnleashedProvider implements UnleashedProvider {
         }
       }
 
-      const numberOfPages = this.toNumber(response.Pagination?.NumberOfPages);
-      const items = response.Items ?? [];
-
-      if (
-        costByProductGuid.size >= wantedProductGuids.size ||
-        (numberOfPages > 0 && page >= numberOfPages) ||
-        items.length < this.pageSize
-      ) {
+      if (costByProductGuid.size >= wantedProductGuids.size) {
         break;
       }
     }
@@ -433,7 +510,7 @@ class RealUnleashedProvider implements UnleashedProvider {
     };
   }
 
-  async getDashboardData(): Promise<UnleashedData> {
+  private async fetchDashboardDataFresh(): Promise<UnleashedData> {
     try {
       const config = this.getConfig();
       const ranges = this.buildRanges();
@@ -471,14 +548,38 @@ class RealUnleashedProvider implements UnleashedProvider {
         } satisfies PeriodTotals;
       });
 
-      return this.buildData(totals);
+      const data = this.buildData(totals);
+      unleashedCachedData = {
+        data,
+        expiresAt: Date.now() + UNLEASHED_CACHE_TTL_MS
+      };
+      return data;
     } catch (error) {
       console.error("[Unleashed] Runtime error. Falling back to empty values.", {
         hasApiId: Boolean(process.env.UNLEASHED_API_ID),
         hasApiKey: Boolean(process.env.UNLEASHED_API_KEY),
         error: error instanceof Error ? error.message : String(error)
       });
+      if (unleashedCachedData) {
+        return unleashedCachedData.data;
+      }
       return this.fallback();
+    }
+  }
+
+  async getDashboardData(): Promise<UnleashedData> {
+    if (unleashedCachedData && Date.now() < unleashedCachedData.expiresAt) {
+      return unleashedCachedData.data;
+    }
+
+    if (!unleashedInFlightData) {
+      unleashedInFlightData = this.fetchDashboardDataFresh();
+    }
+
+    try {
+      return await unleashedInFlightData;
+    } finally {
+      unleashedInFlightData = null;
     }
   }
 }
