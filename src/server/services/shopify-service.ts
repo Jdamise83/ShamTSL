@@ -1,5 +1,7 @@
 import "server-only";
 
+import { BetaAnalyticsDataClient } from "@google-analytics/data";
+
 import type { LinePoint } from "@/types/dashboard";
 import type { ShopifyData } from "@/types/integrations";
 
@@ -112,6 +114,13 @@ interface GraphqlOrdersResponse {
   errors?: Array<{ message?: string }>;
 }
 
+type ChannelCounts = Record<AcquisitionChannel, number>;
+
+interface Ga4AttributionSignals {
+  totals: ChannelCounts;
+  byPath: Map<string, ChannelCounts>;
+}
+
 const PERIODS: Array<{ key: PeriodKey; label: string }> = [
   { key: "day", label: "Day" },
   { key: "last7", label: "Last 7 days" },
@@ -173,6 +182,36 @@ function formatCurrency(value: number, currency: string) {
 
 function formatNumber(value: number) {
   return Math.round(Number.isFinite(value) ? value : 0).toLocaleString("en-GB");
+}
+
+function initChannelCounts(): ChannelCounts {
+  return {
+    google_ads: 0,
+    unbranded_seo: 0
+  };
+}
+
+function pickDominantChannel(counts: ChannelCounts): AcquisitionChannel | null {
+  if (counts.google_ads === counts.unbranded_seo) {
+    return null;
+  }
+
+  return counts.google_ads > counts.unbranded_seo ? "google_ads" : "unbranded_seo";
+}
+
+function normalizeLandingPath(rawPath: string): string {
+  const raw = rawPath.trim();
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parsed = raw.includes("://") ? new URL(raw) : new URL(raw, "https://example.com");
+    const pathname = parsed.pathname.toLowerCase().replace(/\/+$/, "");
+    return pathname || "/";
+  } catch {
+    return "";
+  }
 }
 
 function getBoundaries(now = new Date()) {
@@ -684,13 +723,21 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
 
     const payload = (await response.json()) as GraphqlOrdersResponse;
 
+    const hasOrderData = Array.isArray(payload.data?.orders?.edges);
+
     if (!response.ok) {
       const message = payload.errors?.[0]?.message ?? "Unknown GraphQL error";
       throw new Error(`GraphQL ${response.status}: ${message}`);
     }
 
-    if (payload.errors?.length) {
+    if (payload.errors?.length && !hasOrderData) {
       throw new Error(payload.errors[0]?.message ?? "GraphQL query failed.");
+    }
+
+    if (payload.errors?.length && hasOrderData) {
+      console.warn("[Shopify] GraphQL returned partial data with field errors. Continuing with available order data.", {
+        firstError: payload.errors[0]?.message
+      });
     }
 
     const edges = payload.data?.orders?.edges ?? [];
@@ -804,7 +851,156 @@ function parseSearchParams(rawUrl: string) {
   }
 }
 
-function detectAcquisition(order: ShopifyOrder): AcquisitionChannel | null {
+function classifyGa4Channel(params: {
+  channelGroup: string;
+  source: string;
+  medium: string;
+  campaign: string;
+  landingPath: string;
+}): AcquisitionChannel | null {
+  const channelGroup = params.channelGroup.toLowerCase();
+  const source = params.source.toLowerCase();
+  const medium = params.medium.toLowerCase();
+  const campaign = params.campaign.toLowerCase();
+  const context = `${source} ${medium} ${campaign} ${params.landingPath}`;
+
+  if (
+    channelGroup.includes("paid search") ||
+    ((source.includes("google") || campaign.includes("google")) &&
+      /(cpc|ppc|paid|paidsearch|shopping|display|remarketing)/.test(`${medium} ${campaign}`))
+  ) {
+    return "google_ads";
+  }
+
+  const organicSearch = channelGroup.includes("organic search") || medium.includes("organic");
+  if (organicSearch && source.includes("google") && !containsBrand(context)) {
+    return "unbranded_seo";
+  }
+
+  return null;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+async function fetchGa4AttributionSignals(timeoutMs: number): Promise<Ga4AttributionSignals | null> {
+  const propertyId = readEnv(["GA4_PROPERTY_ID"]);
+  const clientEmail = readEnv(["GA4_CLIENT_EMAIL", "GOOGLE_CLIENT_EMAIL"]);
+  const privateKeyRaw = readEnv(["GA4_PRIVATE_KEY", "GOOGLE_PRIVATE_KEY"]);
+
+  if (!propertyId || !clientEmail || !privateKeyRaw) {
+    return null;
+  }
+
+  const privateKey = privateKeyRaw.replace(/\\n/g, "\n");
+  const client = new BetaAnalyticsDataClient({
+    credentials: {
+      client_email: clientEmail,
+      private_key: privateKey
+    }
+  });
+
+  const { yearStart } = getBoundaries();
+  const startDate = yearStart.toISOString().slice(0, 10);
+
+  const [report] = await withTimeout(
+    client.runReport({
+      property: `properties/${propertyId}`,
+      dateRanges: [{ startDate, endDate: "today" }],
+      dimensions: [
+        { name: "landingPagePlusQueryString" },
+        { name: "sessionDefaultChannelGroup" },
+        { name: "sessionSource" },
+        { name: "sessionMedium" },
+        { name: "sessionCampaignName" }
+      ],
+      metrics: [{ name: "transactions" }],
+      limit: 50_000
+    }),
+    Math.min(timeoutMs, 10_000),
+    "GA4 attribution"
+  );
+
+  const totals = initChannelCounts();
+  const byPath = new Map<string, ChannelCounts>();
+
+  for (const row of report.rows ?? []) {
+    const landingRaw = row.dimensionValues?.[0]?.value ?? "";
+    const channelGroup = row.dimensionValues?.[1]?.value ?? "";
+    const source = row.dimensionValues?.[2]?.value ?? "";
+    const medium = row.dimensionValues?.[3]?.value ?? "";
+    const campaign = row.dimensionValues?.[4]?.value ?? "";
+    const transactions = toNumber(row.metricValues?.[0]?.value ?? 0);
+
+    if (transactions <= 0) {
+      continue;
+    }
+
+    const landingPath = normalizeLandingPath(landingRaw);
+    const channel = classifyGa4Channel({
+      channelGroup,
+      source,
+      medium,
+      campaign,
+      landingPath
+    });
+
+    if (!channel) {
+      continue;
+    }
+
+    totals[channel] += transactions;
+
+    if (!landingPath) {
+      continue;
+    }
+
+    const current = byPath.get(landingPath) ?? initChannelCounts();
+    current[channel] += transactions;
+    byPath.set(landingPath, current);
+  }
+
+  if (totals.google_ads <= 0 && totals.unbranded_seo <= 0) {
+    return null;
+  }
+
+  return {
+    totals,
+    byPath
+  };
+}
+
+function detectAcquisition(
+  order: ShopifyOrder,
+  ga4Signals: Ga4AttributionSignals | null
+): AcquisitionChannel | null {
+  const landingPath = normalizeLandingPath(order.landingPageUrl);
+
+  if (ga4Signals && landingPath) {
+    const pathwayCounts = ga4Signals.byPath.get(landingPath);
+    if (pathwayCounts) {
+      const pathwayMatch = pickDominantChannel(pathwayCounts);
+      if (pathwayMatch) {
+        return pathwayMatch;
+      }
+    }
+  }
+
   const landing = order.landingPageUrl.toLowerCase();
   const referring = order.referringSite.toLowerCase();
   const params = parseSearchParams(order.landingPageUrl);
@@ -818,27 +1014,36 @@ function detectAcquisition(order: ShopifyOrder): AcquisitionChannel | null {
   const hasGclid = context.includes("gclid=");
   const fromGoogle = utmSource.includes("google") || referring.includes("google.");
   const paidMedium = /(cpc|ppc|paid|paidsearch|shopping|display|remarketing)/.test(utmMedium + " " + utmCampaign);
+  const organicGoogle = detectOrganicGoogle(utmSource, utmMedium, referring);
 
-  if (hasGclid || (fromGoogle && paidMedium)) {
-    return "google_ads";
+  const heuristicChannel: AcquisitionChannel | null =
+    hasGclid || (fromGoogle && paidMedium)
+      ? "google_ads"
+      : organicGoogle && !containsBrand(context)
+        ? "unbranded_seo"
+        : null;
+
+  if (!heuristicChannel) {
+    return null;
   }
 
-  const organicGoogle =
-    referring.includes("google.") ||
-    (utmSource.includes("google") && (utmMedium.includes("organic") || utmMedium.includes("seo") || utmMedium === ""));
-
-  if (organicGoogle && !containsBrand(context)) {
-    return "unbranded_seo";
+  if (!ga4Signals) {
+    return heuristicChannel;
   }
 
-  return null;
+  if (ga4Signals.totals[heuristicChannel] > 0) {
+    return heuristicChannel;
+  }
+
+  const totalsFallback = pickDominantChannel(ga4Signals.totals);
+  return totalsFallback ?? heuristicChannel;
 }
 
 function average(sum: number, count: number) {
   return count > 0 ? sum / count : 0;
 }
 
-function deriveMetrics(orders: ShopifyOrder[]): DerivedMetrics {
+function deriveMetrics(orders: ShopifyOrder[], ga4Signals: Ga4AttributionSignals | null): DerivedMetrics {
   const { monthStart } = getBoundaries();
 
   const mtdOrders = orders.filter((order) => {
@@ -927,7 +1132,7 @@ function deriveMetrics(orders: ShopifyOrder[]): DerivedMetrics {
       continue;
     }
 
-    const channel = detectAcquisition(firstOrder);
+    const channel = detectAcquisition(firstOrder, ga4Signals);
     if (!channel) {
       continue;
     }
@@ -975,6 +1180,14 @@ function deriveMetrics(orders: ShopifyOrder[]): DerivedMetrics {
     usRevenueMtd,
     ukRevenueMtd
   };
+}
+
+function detectOrganicGoogle(utmSource: string, utmMedium: string, referring: string) {
+  const organicGoogle =
+    referring.includes("google.") ||
+    (utmSource.includes("google") && (utmMedium.includes("organic") || utmMedium.includes("seo") || utmMedium === ""));
+
+  return organicGoogle;
 }
 
 export interface ShopifyProvider {
@@ -1033,7 +1246,17 @@ class ShopifyProviderImpl implements ShopifyProvider {
         const token = await this.getAccessToken(config.shopifyApi);
         const orders = await fetchOrders(config.shopifyApi, token);
         const periods = aggregatePeriods(orders);
-        const metrics = deriveMetrics(orders);
+        let ga4Signals: Ga4AttributionSignals | null = null;
+
+        try {
+          ga4Signals = await fetchGa4AttributionSignals(config.shopifyApi.timeoutMs);
+        } catch (error) {
+          console.warn("[Shopify] GA4 attribution lookup failed. Falling back to Shopify-only attribution.", {
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+
+        const metrics = deriveMetrics(orders, ga4Signals);
 
         return buildData(periods, metrics, config.shopifyApi.currency);
       } catch (error) {
