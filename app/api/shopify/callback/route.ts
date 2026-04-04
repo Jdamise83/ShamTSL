@@ -85,6 +85,24 @@ function errorRedirect(requestUrl: URL, message: string) {
   );
 }
 
+function normalizeReturnTo(value: string, fallbackOrigin: string): string {
+  const raw = value.trim();
+  if (!raw) {
+    return `${fallbackOrigin}/shopify`;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return `${fallbackOrigin}/shopify`;
+    }
+
+    return parsed.toString();
+  } catch {
+    return `${fallbackOrigin}/shopify`;
+  }
+}
+
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code")?.trim() ?? "";
@@ -108,6 +126,7 @@ export async function GET(request: Request) {
   );
 
   const stateCookie = (cookies.get("shopify_oauth_state") ?? "").trim();
+  const returnTo = normalizeReturnTo(cookies.get("shopify_oauth_return_to") ?? "", requestUrl.origin);
   if (!stateCookie || !state || stateCookie !== state) {
     return errorRedirect(requestUrl, "Invalid Shopify OAuth state");
   }
@@ -212,9 +231,10 @@ export async function GET(request: Request) {
     }
   }
 
-  const response = NextResponse.redirect(
-    new URL("/shopify?shopify_connected=1", requestUrl.origin)
-  );
+  const connectedRedirect = new URL(returnTo);
+  connectedRedirect.searchParams.set("shopify_connected", "1");
+
+  const response = NextResponse.redirect(connectedRedirect.toString());
 
   response.cookies.set("shopify_admin_access_token", accessToken, {
     httpOnly: true,
@@ -232,6 +252,7 @@ export async function GET(request: Request) {
   });
   response.cookies.set("shopify_oauth_state", "", { path: "/", maxAge: 0 });
   response.cookies.set("shopify_oauth_shop", "", { path: "/", maxAge: 0 });
+  response.cookies.set("shopify_oauth_return_to", "", { path: "/", maxAge: 0 });
 
   return response;
 }

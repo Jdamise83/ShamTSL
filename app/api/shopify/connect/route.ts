@@ -53,6 +53,37 @@ function normalizeShopDomain(value: string): string {
   }
 }
 
+function resolveCanonicalOrigin(requestUrl: URL): string {
+  const configured = readEnv(["SHOPIFY_OAUTH_BASE_URL", "APP_BASE_URL"]);
+  if (!configured) {
+    return requestUrl.origin;
+  }
+
+  try {
+    return new URL(configured).origin;
+  } catch {
+    return requestUrl.origin;
+  }
+}
+
+function normalizeReturnTo(value: string, fallbackOrigin: string): string {
+  const raw = value.trim();
+  if (!raw) {
+    return `${fallbackOrigin}/shopify`;
+  }
+
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return `${fallbackOrigin}/shopify`;
+    }
+
+    return parsed.toString();
+  } catch {
+    return `${fallbackOrigin}/shopify`;
+  }
+}
+
 function errorRedirect(requestUrl: URL, message: string) {
   return NextResponse.redirect(
     new URL(`/shopify?shopify_error=${encodeURIComponent(message)}`, requestUrl.origin)
@@ -61,6 +92,17 @@ function errorRedirect(requestUrl: URL, message: string) {
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
+  const canonicalOrigin = resolveCanonicalOrigin(requestUrl);
+  const returnTo = normalizeReturnTo(
+    requestUrl.searchParams.get("return_to") ?? `${requestUrl.origin}/shopify`,
+    requestUrl.origin
+  );
+
+  if (requestUrl.origin !== canonicalOrigin) {
+    const relayUrl = new URL("/api/shopify/connect", canonicalOrigin);
+    relayUrl.searchParams.set("return_to", returnTo);
+    return NextResponse.redirect(relayUrl.toString());
+  }
 
   const shopDomainRaw = readEnv([
     "SHOPIFY_STORE_DOMAIN",
@@ -91,8 +133,7 @@ export async function GET(request: Request) {
   const scopes =
     readEnv(["SHOPIFY_SCOPES"]) || "read_orders,read_customers,read_analytics";
 
-  // Use the current request host to avoid redirect host mismatch between environments.
-  const redirectUri = new URL("/api/shopify/callback", requestUrl.origin).toString();
+  const redirectUri = new URL("/api/shopify/callback", canonicalOrigin).toString();
 
   const authorizeUrl = new URL(`https://${shopDomain}/admin/oauth/authorize`);
   authorizeUrl.searchParams.set("client_id", clientId);
@@ -110,6 +151,13 @@ export async function GET(request: Request) {
     maxAge: 10 * 60
   });
   response.cookies.set("shopify_oauth_shop", shopDomain, {
+    httpOnly: true,
+    secure: requestUrl.protocol === "https:",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 10 * 60
+  });
+  response.cookies.set("shopify_oauth_return_to", returnTo, {
     httpOnly: true,
     secure: requestUrl.protocol === "https:",
     sameSite: "lax",

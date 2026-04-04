@@ -332,10 +332,19 @@ function blankData(): ShopifyData {
   return {
     kpiGroups: [
       {
-        id: "shopify-overview",
-        label: "Shopify MTD Overview",
+        id: "shopify-revenue-overview",
+        label: "Total Revenue Overview",
         metrics: [
+          { id: "shopify_revenue_day", label: "Total revenue Day", value: "-" },
+          { id: "shopify_revenue_last7", label: "Total revenue Last 7 days", value: "-" },
           { id: "shopify_revenue_mtd", label: "Total revenue MTD", value: "-" },
+          { id: "shopify_revenue_ytd", label: "Total revenue YTD", value: "-" }
+        ]
+      },
+      {
+        id: "shopify-customer-overview",
+        label: "Customer Lifetime Overview",
+        metrics: [
           { id: "shopify_orders_mtd", label: "Month to date orders", value: "-" },
           { id: "shopify_customer_ltv", label: "Customer Lifetime value", value: "-" },
           {
@@ -400,7 +409,10 @@ function blankData(): ShopifyData {
 }
 
 function buildData(periods: PeriodSummary[], metrics: DerivedMetrics, currency: string): ShopifyData {
+  const day = periods.find((period) => period.key === "day");
+  const last7 = periods.find((period) => period.key === "last7");
   const mtd = periods.find((period) => period.key === "mtd");
+  const ytd = periods.find((period) => period.key === "ytd");
 
   const trend: LinePoint[] = periods.map((period) => ({
     label: period.key === "last7" ? "Last 7D" : period.key.toUpperCase(),
@@ -410,14 +422,35 @@ function buildData(periods: PeriodSummary[], metrics: DerivedMetrics, currency: 
   return {
     kpiGroups: [
       {
-        id: "shopify-overview",
-        label: "Shopify MTD Overview",
+        id: "shopify-revenue-overview",
+        label: "Total Revenue Overview",
         metrics: [
+          {
+            id: "shopify_revenue_day",
+            label: "Total revenue Day",
+            value: formatCurrency(day?.revenue ?? 0, currency)
+          },
+          {
+            id: "shopify_revenue_last7",
+            label: "Total revenue Last 7 days",
+            value: formatCurrency(last7?.revenue ?? 0, currency)
+          },
           {
             id: "shopify_revenue_mtd",
             label: "Total revenue MTD",
             value: formatCurrency(mtd?.revenue ?? 0, currency)
           },
+          {
+            id: "shopify_revenue_ytd",
+            label: "Total revenue YTD",
+            value: formatCurrency(ytd?.revenue ?? 0, currency)
+          }
+        ]
+      },
+      {
+        id: "shopify-customer-overview",
+        label: "Customer Lifetime Overview",
+        metrics: [
           {
             id: "shopify_orders_mtd",
             label: "Month to date orders",
