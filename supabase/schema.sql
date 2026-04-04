@@ -143,6 +143,19 @@ create trigger set_dashboard_preferences_updated_at
 before update on public.dashboard_preferences
 for each row execute function public.set_updated_at();
 
+create table if not exists public.integration_secrets (
+  id uuid primary key default gen_random_uuid(),
+  key text not null unique,
+  value text not null,
+  meta jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create trigger set_integration_secrets_updated_at
+before update on public.integration_secrets
+for each row execute function public.set_updated_at();
+
 alter table public.profiles enable row level security;
 alter table public.staff_members enable row level security;
 alter table public.calendar_events enable row level security;
@@ -151,6 +164,7 @@ alter table public.holiday_balances enable row level security;
 alter table public.holiday_requests enable row level security;
 alter table public.holiday_adjustments enable row level security;
 alter table public.dashboard_preferences enable row level security;
+alter table public.integration_secrets enable row level security;
 
 -- Example policy set for authenticated internal users.
 -- Tighten further by role if needed.

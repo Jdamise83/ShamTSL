@@ -14,16 +14,43 @@ function readEnv(names: string[]): string {
 }
 
 function normalizeShopDomain(value: string): string {
-  const clean = value.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
-  if (!clean) {
+  const raw = value.trim();
+  if (!raw) {
     return "";
   }
 
-  if (clean.includes(".")) {
-    return clean;
-  }
+  const toDomain = (shop: string) => {
+    const cleanShop = shop.trim().toLowerCase();
+    if (!cleanShop) {
+      return "";
+    }
 
-  return `${clean}.myshopify.com`;
+    if (cleanShop.includes(".")) {
+      return cleanShop;
+    }
+
+    return `${cleanShop}.myshopify.com`;
+  };
+
+  try {
+    const parsed = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
+    if (parsed.hostname.toLowerCase() === "admin.shopify.com") {
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      const storeIndex = segments.findIndex((segment) => segment.toLowerCase() === "store");
+      const handle = storeIndex >= 0 ? (segments[storeIndex + 1] ?? "") : "";
+      return toDomain(handle);
+    }
+
+    return toDomain(parsed.hostname);
+  } catch {
+    const clean = raw.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+    const storeMatch = clean.match(/admin\.shopify\.com\/store\/([^/]+)/i);
+    if (storeMatch?.[1]) {
+      return toDomain(storeMatch[1]);
+    }
+
+    return toDomain(clean.split("/")[0] ?? "");
+  }
 }
 
 function errorRedirect(requestUrl: URL, message: string) {

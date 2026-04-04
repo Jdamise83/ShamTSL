@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 
 import { NextResponse } from "next/server";
 
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+
 function readEnv(names: string[]): string {
   for (const name of names) {
     const value = process.env[name]?.trim();
@@ -14,16 +16,43 @@ function readEnv(names: string[]): string {
 }
 
 function normalizeShopDomain(value: string): string {
-  const clean = value.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
-  if (!clean) {
+  const raw = value.trim();
+  if (!raw) {
     return "";
   }
 
-  if (clean.includes(".")) {
-    return clean;
-  }
+  const toDomain = (shop: string) => {
+    const cleanShop = shop.trim().toLowerCase();
+    if (!cleanShop) {
+      return "";
+    }
 
-  return `${clean}.myshopify.com`;
+    if (cleanShop.includes(".")) {
+      return cleanShop;
+    }
+
+    return `${cleanShop}.myshopify.com`;
+  };
+
+  try {
+    const parsed = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
+    if (parsed.hostname.toLowerCase() === "admin.shopify.com") {
+      const segments = parsed.pathname.split("/").filter(Boolean);
+      const storeIndex = segments.findIndex((segment) => segment.toLowerCase() === "store");
+      const handle = storeIndex >= 0 ? (segments[storeIndex + 1] ?? "") : "";
+      return toDomain(handle);
+    }
+
+    return toDomain(parsed.hostname);
+  } catch {
+    const clean = raw.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+    const storeMatch = clean.match(/admin\.shopify\.com\/store\/([^/]+)/i);
+    if (storeMatch?.[1]) {
+      return toDomain(storeMatch[1]);
+    }
+
+    return toDomain(clean.split("/")[0] ?? "");
+  }
 }
 
 function safeEqualHex(a: string, b: string): boolean {
@@ -149,6 +178,38 @@ export async function GET(request: Request) {
 
   if (!accessToken) {
     return errorRedirect(requestUrl, "Shopify token was missing");
+  }
+
+  const supabase = createSupabaseAdminClient();
+  if (supabase) {
+    const { error } = await supabase.from("integration_secrets").upsert(
+      [
+        {
+          key: "shopify_admin_access_token",
+          value: accessToken,
+          meta: {
+            shopDomain,
+            source: "shopify_oauth"
+          }
+        },
+        {
+          key: "shopify_store_domain",
+          value: shopDomain,
+          meta: {
+            source: "shopify_oauth"
+          }
+        }
+      ],
+      {
+        onConflict: "key"
+      }
+    );
+
+    if (error) {
+      console.warn("[Shopify] Failed to persist token in Supabase integration_secrets.", {
+        error: error.message
+      });
+    }
   }
 
   const response = NextResponse.redirect(
