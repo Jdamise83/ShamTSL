@@ -1,6 +1,7 @@
 import "server-only";
 
 import { BetaAnalyticsDataClient } from "@google-analytics/data";
+import { cookies } from "next/headers";
 
 import type { LinePoint } from "@/types/dashboard";
 import type { ShopifyData } from "@/types/integrations";
@@ -38,6 +39,7 @@ interface ShopifyApiConfig {
   shopDomain: string;
   clientId: string;
   clientSecret: string;
+  allowTokenExchange: boolean;
   adminAccessToken?: string;
   apiVersion: string;
   currency: string;
@@ -52,6 +54,7 @@ interface RuntimeConfig {
 interface CacheEntry {
   data: ShopifyData;
   expiresAt: number;
+  authFingerprint: string;
 }
 
 interface TokenCacheEntry {
@@ -145,6 +148,11 @@ function readEnv(names: string[]): string {
   return "";
 }
 
+function isTruthyFlag(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
 function normalizeShopDomain(value: string): string {
   const clean = value.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
   if (!clean) {
@@ -169,6 +177,38 @@ function toNumber(value: unknown): number {
   }
 
   return 0;
+}
+
+function looksLikeShopifyAccessToken(value: string): boolean {
+  const token = value.trim();
+  if (!token) {
+    return false;
+  }
+
+  return /^shpat_|^shppa_|^shpca_/.test(token);
+}
+
+async function readShopifyAccessTokenFromCookie(): Promise<string> {
+  try {
+    const cookieStore = await cookies();
+    const token =
+      cookieStore.get("shopify_admin_access_token")?.value ??
+      cookieStore.get("shopify_access_token")?.value ??
+      "";
+
+    return token.trim();
+  } catch {
+    return "";
+  }
+}
+
+function getAuthFingerprint(token: string): string {
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return "none";
+  }
+
+  return `${trimmed.slice(0, 10)}:${trimmed.length}`;
 }
 
 function formatCurrency(value: number, currency: string) {
@@ -431,21 +471,49 @@ function buildData(periods: PeriodSummary[], metrics: DerivedMetrics, currency: 
 }
 
 function resolveConfig(): RuntimeConfig {
-  const clientId = readEnv(["SHOPIFY_APP_CLIENT_ID", "SHOPIFY_CLIENT_ID", "SHOPIFY_API_KEY"]);
+  const clientId = readEnv([
+    "SHOPIFY_APP_CLIENT_ID",
+    "SHOPIFY_CLIENT_ID",
+    "SHOPIFY_API_KEY",
+    "SHOPIFY_KEY",
+    "SHOPIFY_PUBLIC_API_KEY"
+  ]);
   const clientSecret = readEnv([
     "SHOPIFY_APP_CLIENT_SECRET",
     "SHOPIFY_CLIENT_SECRET",
     "SHOPIFY_API_SECRET",
-    "SHOPIFY_SECRET_KEY"
+    "SHOPIFY_SECRET_KEY",
+    "SHOPIFY_SECRET",
+    "SHOPIFY_API_PASSWORD"
   ]);
-  const appEndpoint = readEnv(["SHOPIFY_APP_METRICS_ENDPOINT", "SHOPIFY_METRICS_ENDPOINT"]);
+  const appEndpoint = readEnv([
+    "SHOPIFY_APP_METRICS_ENDPOINT",
+    "SHOPIFY_METRICS_ENDPOINT",
+    "SHOPIFY_APP_ENDPOINT",
+    "SHOPIFY_ENDPOINT"
+  ]);
 
-  const shopDomainRaw = readEnv(["SHOPIFY_STORE_DOMAIN", "SHOPIFY_SHOP_DOMAIN", "SHOPIFY_SHOP"]);
+  const shopDomainRaw = readEnv([
+    "SHOPIFY_STORE_DOMAIN",
+    "SHOPIFY_SHOP_DOMAIN",
+    "SHOPIFY_SHOP",
+    "SHOPIFY_DOMAIN",
+    "SHOPIFY_MYSHOPIFY_DOMAIN",
+    "SHOPIFY_STORE_ID"
+  ]);
   const shopDomain = normalizeShopDomain(shopDomainRaw);
-  const adminAccessToken = readEnv(["SHOPIFY_ADMIN_ACCESS_TOKEN", "SHOPIFY_ACCESS_TOKEN"]);
+  const adminAccessToken = readEnv([
+    "SHOPIFY_ADMIN_ACCESS_TOKEN",
+    "SHOPIFY_ACCESS_TOKEN",
+    "SHOPIFY_ADMIN_API_ACCESS_TOKEN",
+    "SHOPIFY_APP_ACCESS_TOKEN",
+    "SHOPIFY_TOKEN",
+    "SHOPIFY_PRIVATE_TOKEN"
+  ]);
   const apiVersion = readEnv(["SHOPIFY_API_VERSION"]) || DEFAULT_API_VERSION;
   const currency = (readEnv(["SHOPIFY_CURRENCY"]) || "GBP").toUpperCase();
   const timeoutRaw = readEnv(["SHOPIFY_APP_TIMEOUT_MS", "SHOPIFY_TIMEOUT_MS"]);
+  const allowTokenExchange = isTruthyFlag(readEnv(["SHOPIFY_ENABLE_TOKEN_EXCHANGE"]));
   const timeout = Number(timeoutRaw);
   const timeoutMs = Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT_MS;
 
@@ -466,6 +534,7 @@ function resolveConfig(): RuntimeConfig {
           shopDomain,
           clientId,
           clientSecret,
+          allowTokenExchange,
           adminAccessToken: adminAccessToken || undefined,
           apiVersion,
           currency,
@@ -662,34 +731,15 @@ async function exchangeToken(config: ShopifyApiConfig): Promise<TokenCacheEntry>
   };
 }
 
-async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promise<ShopifyOrder[]> {
+async function fetchOrdersWithQuery(
+  config: ShopifyApiConfig,
+  accessToken: string,
+  query: string,
+  lightweight = false
+): Promise<ShopifyOrder[]> {
   const endpoint = `https://${config.shopDomain}/admin/api/${config.apiVersion}/graphql.json`;
   const { fetchStart } = getBoundaries();
   const queryFilter = `created_at:>=${fetchStart.toISOString()}`;
-
-  const query = `
-    query DashboardOrders($first: Int!, $after: String, $query: String!) {
-      orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
-        edges {
-          node {
-            createdAt
-            currentTotalPriceSet { shopMoney { amount } }
-            totalPriceSet { shopMoney { amount } }
-            landingPageUrl
-            referringSite
-            shippingAddress { countryCodeV2 }
-            billingAddress { countryCodeV2 }
-            customer {
-              id
-              numberOfOrders
-              amountSpent { amount }
-            }
-          }
-        }
-        pageInfo { hasNextPage endCursor }
-      }
-    }
-  `;
 
   const orders: ShopifyOrder[] = [];
   let cursor: string | null = null;
@@ -722,7 +772,6 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
     );
 
     const payload = (await response.json()) as GraphqlOrdersResponse;
-
     const hasOrderData = Array.isArray(payload.data?.orders?.edges);
 
     if (!response.ok) {
@@ -749,29 +798,26 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
       }
 
       const revenue = toNumber(node?.currentTotalPriceSet?.shopMoney?.amount ?? node?.totalPriceSet?.shopMoney?.amount ?? 0);
-      const customerId = node?.customer?.id ?? null;
-      const customerLifetimeValueRaw = node?.customer?.amountSpent?.amount;
-      const customerLifetimeValue =
-        customerLifetimeValueRaw === undefined ? null : toNumber(customerLifetimeValueRaw);
-      const customerLifetimeOrdersRaw = node?.customer?.numberOfOrders;
-      const customerLifetimeOrders =
-        customerLifetimeOrdersRaw === undefined || customerLifetimeOrdersRaw === null
-          ? null
-          : toNumber(customerLifetimeOrdersRaw);
-      const countryCode =
-        String(node?.shippingAddress?.countryCodeV2 ?? node?.billingAddress?.countryCodeV2 ?? "")
-          .toUpperCase()
-          .trim();
 
       orders.push({
         createdAt,
         revenue,
-        customerId,
-        customerLifetimeValue,
-        customerLifetimeOrders,
-        landingPageUrl: node?.landingPageUrl ?? "",
-        referringSite: node?.referringSite ?? "",
-        countryCode
+        customerId: lightweight ? null : (node?.customer?.id ?? null),
+        customerLifetimeValue:
+          lightweight || node?.customer?.amountSpent?.amount === undefined
+            ? null
+            : toNumber(node?.customer?.amountSpent?.amount),
+        customerLifetimeOrders:
+          lightweight || node?.customer?.numberOfOrders === undefined || node?.customer?.numberOfOrders === null
+            ? null
+            : toNumber(node?.customer?.numberOfOrders),
+        landingPageUrl: lightweight ? "" : (node?.landingPageUrl ?? ""),
+        referringSite: lightweight ? "" : (node?.referringSite ?? ""),
+        countryCode: lightweight
+          ? ""
+          : String(node?.shippingAddress?.countryCodeV2 ?? node?.billingAddress?.countryCodeV2 ?? "")
+              .toUpperCase()
+              .trim()
       });
     }
 
@@ -780,6 +826,56 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
   }
 
   return orders;
+}
+
+async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promise<ShopifyOrder[]> {
+  const richQuery = `
+    query DashboardOrders($first: Int!, $after: String, $query: String!) {
+      orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        edges {
+          node {
+            createdAt
+            currentTotalPriceSet { shopMoney { amount } }
+            totalPriceSet { shopMoney { amount } }
+            landingPageUrl
+            referringSite
+            shippingAddress { countryCodeV2 }
+            billingAddress { countryCodeV2 }
+            customer {
+              id
+              numberOfOrders
+              amountSpent { amount }
+            }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `;
+
+  const lightweightQuery = `
+    query DashboardOrdersLite($first: Int!, $after: String, $query: String!) {
+      orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        edges {
+          node {
+            createdAt
+            currentTotalPriceSet { shopMoney { amount } }
+            totalPriceSet { shopMoney { amount } }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `;
+
+  try {
+    return await fetchOrdersWithQuery(config, accessToken, richQuery, false);
+  } catch (error) {
+    console.warn("[Shopify] Rich order query failed. Falling back to lightweight query.", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    return fetchOrdersWithQuery(config, accessToken, lightweightQuery, true);
+  }
 }
 
 function aggregatePeriods(orders: ShopifyOrder[]): PeriodSummary[] {
@@ -1200,8 +1296,23 @@ class ShopifyProviderImpl implements ShopifyProvider {
   private inFlight: Promise<ShopifyData> | null = null;
 
   async getDashboardData(): Promise<ShopifyData> {
+    const cookieToken = await readShopifyAccessTokenFromCookie();
+    const envToken = readEnv([
+      "SHOPIFY_ADMIN_ACCESS_TOKEN",
+      "SHOPIFY_ACCESS_TOKEN",
+      "SHOPIFY_ADMIN_API_ACCESS_TOKEN",
+      "SHOPIFY_APP_ACCESS_TOKEN",
+      "SHOPIFY_TOKEN",
+      "SHOPIFY_PRIVATE_TOKEN"
+    ]);
+    const authFingerprint = getAuthFingerprint(cookieToken || envToken);
+
     const now = Date.now();
-    if (this.dataCache && this.dataCache.expiresAt > now) {
+    if (
+      this.dataCache &&
+      this.dataCache.expiresAt > now &&
+      this.dataCache.authFingerprint === authFingerprint
+    ) {
       return this.dataCache.data;
     }
 
@@ -1213,7 +1324,8 @@ class ShopifyProviderImpl implements ShopifyProvider {
       .then((data) => {
         this.dataCache = {
           data,
-          expiresAt: Date.now() + DATA_CACHE_TTL_MS
+          expiresAt: Date.now() + DATA_CACHE_TTL_MS,
+          authFingerprint
         };
         return data;
       })
@@ -1229,8 +1341,28 @@ class ShopifyProviderImpl implements ShopifyProvider {
       return config.adminAccessToken;
     }
 
+    const cookieToken = await readShopifyAccessTokenFromCookie();
+    if (looksLikeShopifyAccessToken(cookieToken)) {
+      return cookieToken;
+    }
+
+    // Common misconfiguration: access token saved in secret/key env.
+    if (looksLikeShopifyAccessToken(config.clientSecret)) {
+      return config.clientSecret;
+    }
+
+    if (looksLikeShopifyAccessToken(config.clientId)) {
+      return config.clientId;
+    }
+
     if (this.tokenCache && this.tokenCache.expiresAt > Date.now()) {
       return this.tokenCache.token;
+    }
+
+    if (!config.allowTokenExchange) {
+      throw new Error(
+        "Missing Shopify admin access token. Set SHOPIFY_ADMIN_ACCESS_TOKEN (or SHOPIFY_ADMIN_API_ACCESS_TOKEN)."
+      );
     }
 
     const token = await exchangeToken(config);
@@ -1262,6 +1394,8 @@ class ShopifyProviderImpl implements ShopifyProvider {
       } catch (error) {
         console.error("[Shopify] Shopify Admin API path failed.", {
           shopDomain: config.shopifyApi.shopDomain,
+          hasAdminAccessToken: Boolean(config.shopifyApi.adminAccessToken),
+          allowTokenExchange: config.shopifyApi.allowTokenExchange,
           error: error instanceof Error ? error.message : String(error)
         });
       }
@@ -1279,12 +1413,42 @@ class ShopifyProviderImpl implements ShopifyProvider {
     }
 
     console.warn("[Shopify] No working auth path. Returning fallback.", {
-      hasAppEndpoint: Boolean(readEnv(["SHOPIFY_APP_METRICS_ENDPOINT", "SHOPIFY_METRICS_ENDPOINT"])),
-      hasClientId: Boolean(readEnv(["SHOPIFY_APP_CLIENT_ID", "SHOPIFY_CLIENT_ID", "SHOPIFY_API_KEY"])),
-      hasClientSecret: Boolean(
-        readEnv(["SHOPIFY_APP_CLIENT_SECRET", "SHOPIFY_CLIENT_SECRET", "SHOPIFY_API_SECRET", "SHOPIFY_SECRET_KEY"])
+      hasAppEndpoint: Boolean(
+        readEnv(["SHOPIFY_APP_METRICS_ENDPOINT", "SHOPIFY_METRICS_ENDPOINT", "SHOPIFY_APP_ENDPOINT", "SHOPIFY_ENDPOINT"])
       ),
-      hasShopDomain: Boolean(readEnv(["SHOPIFY_STORE_DOMAIN", "SHOPIFY_SHOP_DOMAIN", "SHOPIFY_SHOP"]))
+      hasClientId: Boolean(
+        readEnv(["SHOPIFY_APP_CLIENT_ID", "SHOPIFY_CLIENT_ID", "SHOPIFY_API_KEY", "SHOPIFY_KEY", "SHOPIFY_PUBLIC_API_KEY"])
+      ),
+      hasClientSecret: Boolean(
+        readEnv([
+          "SHOPIFY_APP_CLIENT_SECRET",
+          "SHOPIFY_CLIENT_SECRET",
+          "SHOPIFY_API_SECRET",
+          "SHOPIFY_SECRET_KEY",
+          "SHOPIFY_SECRET",
+          "SHOPIFY_API_PASSWORD"
+        ])
+      ),
+      hasShopDomain: Boolean(
+        readEnv([
+          "SHOPIFY_STORE_DOMAIN",
+          "SHOPIFY_SHOP_DOMAIN",
+          "SHOPIFY_SHOP",
+          "SHOPIFY_DOMAIN",
+          "SHOPIFY_MYSHOPIFY_DOMAIN",
+          "SHOPIFY_STORE_ID"
+        ])
+      ),
+      hasAdminAccessToken: Boolean(
+        readEnv([
+          "SHOPIFY_ADMIN_ACCESS_TOKEN",
+          "SHOPIFY_ACCESS_TOKEN",
+          "SHOPIFY_ADMIN_API_ACCESS_TOKEN",
+          "SHOPIFY_APP_ACCESS_TOKEN",
+          "SHOPIFY_TOKEN",
+          "SHOPIFY_PRIVATE_TOKEN"
+        ])
+      )
     });
 
     return blankData();
