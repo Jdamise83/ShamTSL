@@ -7,9 +7,9 @@ export default async function ShopifyPage() {
   return (
     <PerformanceModuleView
       title="Shopify"
-      description="Orders today health check with day, last 7 days, and month-to-date order/revenue summary."
+      description="MTD revenue/orders, customer lifetime value, channel acquisition quality, and US vs UK revenue."
       data={data}
-      splitTitle="Channel Split"
+      splitTitle="US vs UK Revenue (MTD)"
       valuePrefix=""
     />
   );

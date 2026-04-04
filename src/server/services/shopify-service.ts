@@ -4,12 +4,24 @@ import type { LinePoint } from "@/types/dashboard";
 import type { ShopifyData } from "@/types/integrations";
 
 type PeriodKey = "day" | "last7" | "mtd" | "ytd";
+type AcquisitionChannel = "google_ads" | "unbranded_seo";
 
 interface PeriodSummary {
   key: PeriodKey;
   label: string;
   revenue: number;
   orders: number;
+}
+
+interface DerivedMetrics {
+  customerLifetimeValue: number;
+  customerAverageLifetimeOrders: number;
+  googleAdsFirstOrderAov: number;
+  googleAdsLtv: number;
+  unbrandedSeoFirstOrderAov: number;
+  unbrandedSeoLtv: number;
+  usRevenueMtd: number;
+  ukRevenueMtd: number;
 }
 
 interface AppEndpointConfig {
@@ -48,6 +60,12 @@ interface TokenCacheEntry {
 interface ShopifyOrder {
   createdAt: string;
   revenue: number;
+  customerId: string | null;
+  customerLifetimeValue: number | null;
+  customerLifetimeOrders: number | null;
+  landingPageUrl: string;
+  referringSite: string;
+  countryCode: string;
 }
 
 interface GraphqlOrderEdge {
@@ -60,6 +78,21 @@ interface GraphqlOrderEdge {
     };
     totalPriceSet?: {
       shopMoney?: {
+        amount?: string;
+      };
+    };
+    landingPageUrl?: string;
+    referringSite?: string;
+    shippingAddress?: {
+      countryCodeV2?: string;
+    };
+    billingAddress?: {
+      countryCodeV2?: string;
+    };
+    customer?: {
+      id?: string;
+      numberOfOrders?: number;
+      amountSpent?: {
         amount?: string;
       };
     };
@@ -85,6 +118,8 @@ const PERIODS: Array<{ key: PeriodKey; label: string }> = [
   { key: "mtd", label: "Month to date" },
   { key: "ytd", label: "YTD" }
 ];
+
+const BRAND_TERMS = ["snus life", "snuslife", "the snus life", "thesnuslife"];
 
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_API_VERSION = "2025-01";
@@ -151,24 +186,83 @@ function getBoundaries(now = new Date()) {
   return { now, dayStart, last7Start, monthStart, yearStart, fetchStart };
 }
 
+function emptyDerivedMetrics(): DerivedMetrics {
+  return {
+    customerLifetimeValue: 0,
+    customerAverageLifetimeOrders: 0,
+    googleAdsFirstOrderAov: 0,
+    googleAdsLtv: 0,
+    unbrandedSeoFirstOrderAov: 0,
+    unbrandedSeoLtv: 0,
+    usRevenueMtd: 0,
+    ukRevenueMtd: 0
+  };
+}
+
 function blankData(): ShopifyData {
   return {
     kpiGroups: [
       {
-        id: "shopify_orders_today_group",
-        label: "Shopify Health Check",
-        metrics: [{ id: "shopify_orders_today", label: "Orders today", value: "-" }]
+        id: "shopify-overview",
+        label: "Shopify MTD Overview",
+        metrics: [
+          { id: "shopify_revenue_mtd", label: "Total revenue MTD", value: "-" },
+          { id: "shopify_orders_mtd", label: "Month to date orders", value: "-" },
+          { id: "shopify_customer_ltv", label: "Customer Lifetime value", value: "-" },
+          {
+            id: "shopify_customer_lifetime_orders",
+            label: "Customer average lifetime orders",
+            value: "-"
+          }
+        ]
+      },
+      {
+        id: "shopify-acquisition",
+        label: "Acquisition Cohorts",
+        metrics: [
+          {
+            id: "shopify_google_ads_first_order_aov",
+            label: "Customer AOV first order from Google Ads",
+            value: "-"
+          },
+          {
+            id: "shopify_google_ads_ltv",
+            label: "Customer LTV from Google Ads",
+            value: "-"
+          },
+          {
+            id: "shopify_unbranded_seo_first_order_aov",
+            label: "Customer AOV first order from Unbranded SEO",
+            value: "-"
+          },
+          {
+            id: "shopify_unbranded_seo_ltv",
+            label: "Customer LTV from Unbranded SEO",
+            value: "-"
+          }
+        ]
+      },
+      {
+        id: "shopify-country-mtd",
+        label: "Total Revenue by Country (MTD)",
+        metrics: [
+          { id: "shopify_us_revenue_mtd", label: "US revenue MTD", value: "-" },
+          { id: "shopify_uk_revenue_mtd", label: "UK revenue MTD", value: "-" }
+        ]
       }
     ],
-    charts: { trend: [], split: [] },
+    charts: {
+      trend: [],
+      split: []
+    },
     tables: [
       {
-        key: "shopify_financials",
+        key: "shopify-financial-performance",
         title: "Financial Performance",
         rows: PERIODS.map((period) => ({
           period: period.label,
-          orders: "-",
           revenue: "-",
+          orders: "-",
           aov: "-"
         }))
       }
@@ -176,8 +270,8 @@ function blankData(): ShopifyData {
   };
 }
 
-function buildData(periods: PeriodSummary[], currency: string): ShopifyData {
-  const day = periods.find((period) => period.key === "day");
+function buildData(periods: PeriodSummary[], metrics: DerivedMetrics, currency: string): ShopifyData {
+  const mtd = periods.find((period) => period.key === "mtd");
 
   const trend: LinePoint[] = periods.map((period) => ({
     label: period.key === "last7" ? "Last 7D" : period.key.toUpperCase(),
@@ -187,34 +281,111 @@ function buildData(periods: PeriodSummary[], currency: string): ShopifyData {
   return {
     kpiGroups: [
       {
-        id: "shopify_orders_today_group",
-        label: "Shopify Health Check",
+        id: "shopify-overview",
+        label: "Shopify MTD Overview",
         metrics: [
           {
-            id: "shopify_orders_today",
-            label: "Orders today",
-            value: formatNumber(day?.orders ?? 0)
+            id: "shopify_revenue_mtd",
+            label: "Total revenue MTD",
+            value: formatCurrency(mtd?.revenue ?? 0, currency)
+          },
+          {
+            id: "shopify_orders_mtd",
+            label: "Month to date orders",
+            value: formatNumber(mtd?.orders ?? 0)
+          },
+          {
+            id: "shopify_customer_ltv",
+            label: "Customer Lifetime value",
+            value: formatCurrency(metrics.customerLifetimeValue, currency)
+          },
+          {
+            id: "shopify_customer_lifetime_orders",
+            label: "Customer average lifetime orders",
+            value: metrics.customerAverageLifetimeOrders.toFixed(2)
+          }
+        ]
+      },
+      {
+        id: "shopify-acquisition",
+        label: "Acquisition Cohorts",
+        metrics: [
+          {
+            id: "shopify_google_ads_first_order_aov",
+            label: "Customer AOV first order from Google Ads",
+            value: formatCurrency(metrics.googleAdsFirstOrderAov, currency)
+          },
+          {
+            id: "shopify_google_ads_ltv",
+            label: "Customer LTV from Google Ads",
+            value: formatCurrency(metrics.googleAdsLtv, currency)
+          },
+          {
+            id: "shopify_unbranded_seo_first_order_aov",
+            label: "Customer AOV first order from Unbranded SEO",
+            value: formatCurrency(metrics.unbrandedSeoFirstOrderAov, currency)
+          },
+          {
+            id: "shopify_unbranded_seo_ltv",
+            label: "Customer LTV from Unbranded SEO",
+            value: formatCurrency(metrics.unbrandedSeoLtv, currency)
+          }
+        ]
+      },
+      {
+        id: "shopify-country-mtd",
+        label: "Total Revenue by Country (MTD)",
+        metrics: [
+          {
+            id: "shopify_us_revenue_mtd",
+            label: "US revenue MTD",
+            value: formatCurrency(metrics.usRevenueMtd, currency)
+          },
+          {
+            id: "shopify_uk_revenue_mtd",
+            label: "UK revenue MTD",
+            value: formatCurrency(metrics.ukRevenueMtd, currency)
           }
         ]
       }
     ],
     charts: {
       trend,
-      split: []
+      split: [
+        { label: "US", value: metrics.usRevenueMtd },
+        { label: "UK", value: metrics.ukRevenueMtd }
+      ]
     },
     tables: [
       {
-        key: "shopify_financials",
+        key: "shopify-financial-performance",
         title: "Financial Performance",
         rows: periods.map((period) => {
           const aov = period.orders > 0 ? period.revenue / period.orders : 0;
+
           return {
             period: period.label,
-            orders: formatNumber(period.orders),
             revenue: formatCurrency(period.revenue, currency),
+            orders: formatNumber(period.orders),
             aov: formatCurrency(aov, currency)
           };
         })
+      },
+      {
+        key: "shopify-acquisition-performance",
+        title: "Acquisition Performance",
+        rows: [
+          {
+            channel: "Google Ads",
+            firstOrderAov: formatCurrency(metrics.googleAdsFirstOrderAov, currency),
+            customerLtv: formatCurrency(metrics.googleAdsLtv, currency)
+          },
+          {
+            channel: "Unbranded SEO",
+            firstOrderAov: formatCurrency(metrics.unbrandedSeoFirstOrderAov, currency),
+            customerLtv: formatCurrency(metrics.unbrandedSeoLtv, currency)
+          }
+        ]
       }
     ]
   };
@@ -278,6 +449,7 @@ function getByPath(source: unknown, path: string): unknown {
     if (!isRecord(current)) {
       return undefined;
     }
+
     return current[key];
   }, source);
 }
@@ -314,13 +486,11 @@ function parseAppPayload(payload: unknown, currency: string): ShopifyData {
         continue;
       }
 
-      const rawKey = String(
-        row.period ?? row.key ?? row.label ?? row.id ?? ""
-      )
+      const rawKey = String(row.period ?? row.key ?? row.label ?? row.id ?? "")
         .toLowerCase()
         .replace(/\s+/g, "_");
 
-      const period =
+      const periodKey: PeriodKey | null =
         rawKey === "day" || rawKey === "today"
           ? "day"
           : rawKey === "last7" || rawKey === "last_7_days" || rawKey === "week" || rawKey === "wtd"
@@ -329,37 +499,23 @@ function parseAppPayload(payload: unknown, currency: string): ShopifyData {
               ? "mtd"
               : rawKey === "ytd" || rawKey === "year" || rawKey === "year_to_date" || rawKey === "this_year"
                 ? "ytd"
-              : null;
+                : null;
 
+      if (!periodKey) {
+        continue;
+      }
+
+      const period = periods.find((item) => item.key === periodKey);
       if (!period) {
         continue;
       }
 
-      const existing = periods.find((item) => item.key === period);
-      if (!existing) {
-        continue;
-      }
-
-      existing.revenue = toNumber(row.revenue ?? row.totalRevenue ?? row.sales ?? row.amount ?? 0);
-      existing.orders = toNumber(row.orders ?? row.orderCount ?? row.count ?? 0);
+      period.revenue = toNumber(row.revenue ?? row.totalRevenue ?? row.sales ?? row.amount ?? 0);
+      period.orders = toNumber(row.orders ?? row.orderCount ?? row.count ?? 0);
     }
   }
 
-  const ordersToday = toNumber(
-    getByPath(payload, "ordersToday") ??
-      getByPath(payload, "todayOrders") ??
-      getByPath(payload, "summary.ordersToday") ??
-      getByPath(payload, "data.ordersToday")
-  );
-
-  if (ordersToday > 0) {
-    const day = periods.find((period) => period.key === "day");
-    if (day) {
-      day.orders = ordersToday;
-    }
-  }
-
-  return buildData(periods, currency);
+  return buildData(periods, emptyDerivedMetrics(), currency);
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -381,6 +537,7 @@ async function fetchFromAppEndpoint(config: AppEndpointConfig): Promise<ShopifyD
   url.searchParams.set("periods", "day,last7,mtd,ytd");
 
   const basic = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
+
   const response = await fetchWithTimeout(
     url.toString(),
     {
@@ -454,6 +611,7 @@ async function exchangeToken(config: ShopifyApiConfig): Promise<TokenCacheEntry>
 
   const token = typeof payload.access_token === "string" ? payload.access_token.trim() : "";
   const expiresIn = toNumber(payload.expires_in);
+
   if (!token) {
     throw new Error("Token exchange returned empty access_token.");
   }
@@ -478,6 +636,15 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
             createdAt
             currentTotalPriceSet { shopMoney { amount } }
             totalPriceSet { shopMoney { amount } }
+            landingPageUrl
+            referringSite
+            shippingAddress { countryCodeV2 }
+            billingAddress { countryCodeV2 }
+            customer {
+              id
+              numberOfOrders
+              amountSpent { amount }
+            }
           }
         }
         pageInfo { hasNextPage endCursor }
@@ -516,27 +683,48 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
     );
 
     const payload = (await response.json()) as GraphqlOrdersResponse;
+
     if (!response.ok) {
       const message = payload.errors?.[0]?.message ?? "Unknown GraphQL error";
       throw new Error(`GraphQL ${response.status}: ${message}`);
     }
+
     if (payload.errors?.length) {
       throw new Error(payload.errors[0]?.message ?? "GraphQL query failed.");
     }
 
     const edges = payload.data?.orders?.edges ?? [];
     for (const edge of edges) {
-      const createdAt = edge.node?.createdAt;
+      const node = edge.node;
+      const createdAt = node?.createdAt;
       if (!createdAt) {
         continue;
       }
 
-      const amount =
-        edge.node?.currentTotalPriceSet?.shopMoney?.amount ?? edge.node?.totalPriceSet?.shopMoney?.amount ?? "0";
+      const revenue = toNumber(node?.currentTotalPriceSet?.shopMoney?.amount ?? node?.totalPriceSet?.shopMoney?.amount ?? 0);
+      const customerId = node?.customer?.id ?? null;
+      const customerLifetimeValueRaw = node?.customer?.amountSpent?.amount;
+      const customerLifetimeValue =
+        customerLifetimeValueRaw === undefined ? null : toNumber(customerLifetimeValueRaw);
+      const customerLifetimeOrdersRaw = node?.customer?.numberOfOrders;
+      const customerLifetimeOrders =
+        customerLifetimeOrdersRaw === undefined || customerLifetimeOrdersRaw === null
+          ? null
+          : toNumber(customerLifetimeOrdersRaw);
+      const countryCode =
+        String(node?.shippingAddress?.countryCodeV2 ?? node?.billingAddress?.countryCodeV2 ?? "")
+          .toUpperCase()
+          .trim();
 
       orders.push({
         createdAt,
-        revenue: toNumber(amount)
+        revenue,
+        customerId,
+        customerLifetimeValue,
+        customerLifetimeOrders,
+        landingPageUrl: node?.landingPageUrl ?? "",
+        referringSite: node?.referringSite ?? "",
+        countryCode
       });
     }
 
@@ -547,13 +735,13 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
   return orders;
 }
 
-function aggregate(orders: ShopifyOrder[]): PeriodSummary[] {
+function aggregatePeriods(orders: ShopifyOrder[]): PeriodSummary[] {
   const { now, dayStart, last7Start, monthStart, yearStart } = getBoundaries();
 
   const summary = new Map<PeriodKey, PeriodSummary>(
     PERIODS.map((period) => [
       period.key,
-      { key: period.key, label: period.label, orders: 0, revenue: 0 }
+      { key: period.key, label: period.label, revenue: 0, orders: 0 }
     ])
   );
 
@@ -566,37 +754,227 @@ function aggregate(orders: ShopifyOrder[]): PeriodSummary[] {
     if (createdAt >= dayStart) {
       const day = summary.get("day");
       if (day) {
-        day.orders += 1;
         day.revenue += order.revenue;
+        day.orders += 1;
       }
     }
 
     if (createdAt >= last7Start) {
       const last7 = summary.get("last7");
       if (last7) {
-        last7.orders += 1;
         last7.revenue += order.revenue;
+        last7.orders += 1;
       }
     }
 
     if (createdAt >= monthStart) {
       const mtd = summary.get("mtd");
       if (mtd) {
-        mtd.orders += 1;
         mtd.revenue += order.revenue;
+        mtd.orders += 1;
       }
     }
 
     if (createdAt >= yearStart) {
       const ytd = summary.get("ytd");
       if (ytd) {
-        ytd.orders += 1;
         ytd.revenue += order.revenue;
+        ytd.orders += 1;
       }
     }
   }
 
   return PERIODS.map((period) => summary.get(period.key)).filter((item): item is PeriodSummary => Boolean(item));
+}
+
+function containsBrand(text: string) {
+  const lower = text.toLowerCase();
+  return BRAND_TERMS.some((term) => lower.includes(term));
+}
+
+function parseSearchParams(rawUrl: string) {
+  if (!rawUrl) {
+    return new URLSearchParams();
+  }
+
+  try {
+    return new URL(rawUrl, "https://example.com").searchParams;
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+function detectAcquisition(order: ShopifyOrder): AcquisitionChannel | null {
+  const landing = order.landingPageUrl.toLowerCase();
+  const referring = order.referringSite.toLowerCase();
+  const params = parseSearchParams(order.landingPageUrl);
+
+  const utmSource = (params.get("utm_source") ?? "").toLowerCase();
+  const utmMedium = (params.get("utm_medium") ?? "").toLowerCase();
+  const utmCampaign = (params.get("utm_campaign") ?? "").toLowerCase();
+  const utmTerm = (params.get("utm_term") ?? "").toLowerCase();
+
+  const context = `${landing} ${referring} ${utmSource} ${utmMedium} ${utmCampaign} ${utmTerm}`;
+  const hasGclid = context.includes("gclid=");
+  const fromGoogle = utmSource.includes("google") || referring.includes("google.");
+  const paidMedium = /(cpc|ppc|paid|paidsearch|shopping|display|remarketing)/.test(utmMedium + " " + utmCampaign);
+
+  if (hasGclid || (fromGoogle && paidMedium)) {
+    return "google_ads";
+  }
+
+  const organicGoogle =
+    referring.includes("google.") ||
+    (utmSource.includes("google") && (utmMedium.includes("organic") || utmMedium.includes("seo") || utmMedium === ""));
+
+  if (organicGoogle && !containsBrand(context)) {
+    return "unbranded_seo";
+  }
+
+  return null;
+}
+
+function average(sum: number, count: number) {
+  return count > 0 ? sum / count : 0;
+}
+
+function deriveMetrics(orders: ShopifyOrder[]): DerivedMetrics {
+  const { monthStart } = getBoundaries();
+
+  const mtdOrders = orders.filter((order) => {
+    const date = new Date(order.createdAt);
+    return !Number.isNaN(date.getTime()) && date >= monthStart;
+  });
+
+  let usRevenueMtd = 0;
+  let ukRevenueMtd = 0;
+
+  const mtdCustomerStats = new Map<string, { ltv: number; lifetimeOrders: number }>();
+
+  for (const order of mtdOrders) {
+    if (order.countryCode === "US") {
+      usRevenueMtd += order.revenue;
+    }
+
+    if (order.countryCode === "GB" || order.countryCode === "UK") {
+      ukRevenueMtd += order.revenue;
+    }
+
+    if (!order.customerId) {
+      continue;
+    }
+
+    if (order.customerLifetimeValue === null || order.customerLifetimeOrders === null) {
+      continue;
+    }
+
+    mtdCustomerStats.set(order.customerId, {
+      ltv: order.customerLifetimeValue,
+      lifetimeOrders: order.customerLifetimeOrders
+    });
+  }
+
+  let customerLifetimeValueSum = 0;
+  let customerLifetimeOrdersSum = 0;
+  let customerCount = 0;
+
+  for (const stats of mtdCustomerStats.values()) {
+    customerLifetimeValueSum += stats.ltv;
+    customerLifetimeOrdersSum += stats.lifetimeOrders;
+    customerCount += 1;
+  }
+
+  type CohortAccumulator = {
+    firstOrderRevenueSum: number;
+    firstOrderCount: number;
+    ltvSum: number;
+    ltvCount: number;
+  };
+
+  const initAccumulator = (): CohortAccumulator => ({
+    firstOrderRevenueSum: 0,
+    firstOrderCount: 0,
+    ltvSum: 0,
+    ltvCount: 0
+  });
+
+  const allAcc: Record<AcquisitionChannel, CohortAccumulator> = {
+    google_ads: initAccumulator(),
+    unbranded_seo: initAccumulator()
+  };
+
+  const reliableAcc: Record<AcquisitionChannel, CohortAccumulator> = {
+    google_ads: initAccumulator(),
+    unbranded_seo: initAccumulator()
+  };
+
+  const byCustomer = new Map<string, ShopifyOrder[]>();
+  for (const order of orders) {
+    if (!order.customerId) {
+      continue;
+    }
+
+    const bucket = byCustomer.get(order.customerId) ?? [];
+    bucket.push(order);
+    byCustomer.set(order.customerId, bucket);
+  }
+
+  for (const customerOrders of byCustomer.values()) {
+    customerOrders.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    const firstOrder = customerOrders[0];
+    if (!firstOrder) {
+      continue;
+    }
+
+    const channel = detectAcquisition(firstOrder);
+    if (!channel) {
+      continue;
+    }
+
+    const all = allAcc[channel];
+    all.firstOrderRevenueSum += firstOrder.revenue;
+    all.firstOrderCount += 1;
+
+    if (firstOrder.customerLifetimeValue !== null) {
+      all.ltvSum += firstOrder.customerLifetimeValue;
+      all.ltvCount += 1;
+    }
+
+    const seenOrderCount = customerOrders.length;
+    const lifetimeOrders = firstOrder.customerLifetimeOrders;
+    const hasCompleteHistory = lifetimeOrders === null || lifetimeOrders <= seenOrderCount;
+
+    if (!hasCompleteHistory) {
+      continue;
+    }
+
+    const reliable = reliableAcc[channel];
+    reliable.firstOrderRevenueSum += firstOrder.revenue;
+    reliable.firstOrderCount += 1;
+
+    if (firstOrder.customerLifetimeValue !== null) {
+      reliable.ltvSum += firstOrder.customerLifetimeValue;
+      reliable.ltvCount += 1;
+    }
+  }
+
+  const selectAcc = (channel: AcquisitionChannel) =>
+    reliableAcc[channel].firstOrderCount > 0 ? reliableAcc[channel] : allAcc[channel];
+
+  const googleAcc = selectAcc("google_ads");
+  const seoAcc = selectAcc("unbranded_seo");
+
+  return {
+    customerLifetimeValue: average(customerLifetimeValueSum, customerCount),
+    customerAverageLifetimeOrders: average(customerLifetimeOrdersSum, customerCount),
+    googleAdsFirstOrderAov: average(googleAcc.firstOrderRevenueSum, googleAcc.firstOrderCount),
+    googleAdsLtv: average(googleAcc.ltvSum, googleAcc.ltvCount),
+    unbrandedSeoFirstOrderAov: average(seoAcc.firstOrderRevenueSum, seoAcc.firstOrderCount),
+    unbrandedSeoLtv: average(seoAcc.ltvSum, seoAcc.ltvCount),
+    usRevenueMtd,
+    ukRevenueMtd
+  };
 }
 
 export interface ShopifyProvider {
@@ -650,26 +1028,28 @@ class ShopifyProviderImpl implements ShopifyProvider {
   private async loadFresh(): Promise<ShopifyData> {
     const config = resolveConfig();
 
-    if (config.appEndpoint) {
+    if (config.shopifyApi) {
       try {
-        return await fetchFromAppEndpoint(config.appEndpoint);
+        const token = await this.getAccessToken(config.shopifyApi);
+        const orders = await fetchOrders(config.shopifyApi, token);
+        const periods = aggregatePeriods(orders);
+        const metrics = deriveMetrics(orders);
+
+        return buildData(periods, metrics, config.shopifyApi.currency);
       } catch (error) {
-        console.error("[Shopify] App endpoint path failed. Falling back to Shopify Admin API.", {
-          endpoint: config.appEndpoint.endpoint,
+        console.error("[Shopify] Shopify Admin API path failed.", {
+          shopDomain: config.shopifyApi.shopDomain,
           error: error instanceof Error ? error.message : String(error)
         });
       }
     }
 
-    if (config.shopifyApi) {
+    if (config.appEndpoint) {
       try {
-        const token = await this.getAccessToken(config.shopifyApi);
-        const orders = await fetchOrders(config.shopifyApi, token);
-        const periods = aggregate(orders);
-        return buildData(periods, config.shopifyApi.currency);
+        return await fetchFromAppEndpoint(config.appEndpoint);
       } catch (error) {
-        console.error("[Shopify] Shopify Admin API path failed.", {
-          shopDomain: config.shopifyApi.shopDomain,
+        console.error("[Shopify] App endpoint path failed.", {
+          endpoint: config.appEndpoint.endpoint,
           error: error instanceof Error ? error.message : String(error)
         });
       }

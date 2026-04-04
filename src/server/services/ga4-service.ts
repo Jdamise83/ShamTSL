@@ -10,15 +10,16 @@ export interface Ga4Provider {
 
 class RealGa4Provider implements Ga4Provider {
   private getClient() {
-    const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
-    const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+    const clientEmail = process.env.GA4_CLIENT_EMAIL ?? process.env.GOOGLE_CLIENT_EMAIL;
+    const privateKeyRaw = process.env.GA4_PRIVATE_KEY ?? process.env.GOOGLE_PRIVATE_KEY;
+    const privateKey = privateKeyRaw?.replace(/\\n/g, "\n");
 
     if (!clientEmail) {
-      throw new Error("Missing GOOGLE_CLIENT_EMAIL");
+      throw new Error("Missing GA4_CLIENT_EMAIL (or GOOGLE_CLIENT_EMAIL)");
     }
 
     if (!privateKey) {
-      throw new Error("Missing GOOGLE_PRIVATE_KEY");
+      throw new Error("Missing GA4_PRIVATE_KEY (or GOOGLE_PRIVATE_KEY)");
     }
 
     return new BetaAnalyticsDataClient({
