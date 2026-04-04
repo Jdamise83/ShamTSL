@@ -91,8 +91,8 @@ export async function GET(request: Request) {
   const scopes =
     readEnv(["SHOPIFY_SCOPES"]) || "read_orders,read_customers,read_analytics";
 
-  const callbackBase = readEnv(["APP_BASE_URL"]) || requestUrl.origin;
-  const redirectUri = new URL("/api/shopify/callback", callbackBase).toString();
+  // Use the current request host to avoid redirect host mismatch between environments.
+  const redirectUri = new URL("/api/shopify/callback", requestUrl.origin).toString();
 
   const authorizeUrl = new URL(`https://${shopDomain}/admin/oauth/authorize`);
   authorizeUrl.searchParams.set("client_id", clientId);
