@@ -5,8 +5,13 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import timeGridPlugin from "@fullcalendar/timegrid";
+import type {
+  EventContentArg,
+  EventClickArg,
+  EventDropArg,
+  EventInput
+} from "@fullcalendar/core";
 import type { DateClickArg, EventResizeDoneArg } from "@fullcalendar/interaction";
-import type { EventClickArg, EventContentArg, EventDropArg, EventInput } from "@fullcalendar/core";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
 import { EmptyState } from "@/components/dashboard/empty-state";
@@ -30,31 +35,45 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { CalendarEvent, CalendarEventType, MeetingStatus } from "@/types/calendar";
+import type {
+  BrandCampaignType,
+  CalendarEvent,
+  CalendarItemType,
+  CalendarScope,
+  MeetingStatus,
+  PersonalCalendarOwner
+} from "@/types/calendar";
 
 interface CalendarDashboardClientProps {
   initialEvents: CalendarEvent[];
+  initialView?: CalendarScope;
 }
 
-interface MeetingFormState {
+type PersonalOwnerFilter = PersonalCalendarOwner | "all";
+
+interface EventFormState {
   id: string | null;
-  eventType: CalendarEventType;
   title: string;
   description: string;
   location: string;
   meetingLink: string;
   internalNotes: string;
   status: MeetingStatus;
+  eventType: CalendarItemType;
+  calendarScope: CalendarScope;
+  personalOwner: PersonalCalendarOwner;
+  brandCampaignType: BrandCampaignType;
   startsAt: string;
   endsAt: string;
   startDate: string;
   durationDays: string;
   attendeeEmails: string;
+  includeBoth: boolean;
+  notifyBoth: boolean;
 }
 
 const statusOptions: MeetingStatus[] = ["planned", "confirmed", "done", "cancelled"];
-const calendarEventTypeOptions: CalendarEventType[] = ["meeting", "event", "task"];
-const MS_DAY = 24 * 60 * 60 * 1000;
+const eventTypeOptions: CalendarItemType[] = ["meeting", "event", "task"];
 
 const statusColorMap: Record<MeetingStatus, string> = {
   planned: "#2f74ff",
@@ -63,56 +82,51 @@ const statusColorMap: Record<MeetingStatus, string> = {
   cancelled: "#d14343"
 };
 
-const nonMeetingColorMap: Record<Exclude<CalendarEventType, "meeting">, { bg: string; border: string; text: string }> = {
-  event: { bg: "#f8d7da", border: "#ef9a9a", text: "#7b2323" },
-  task: { bg: "#fff5cc", border: "#e3cc79", text: "#5d4c10" }
+const personalDirectory: Record<
+  PersonalCalendarOwner,
+  {
+    label: string;
+    prefix: string;
+    email: string;
+    color: string;
+  }
+> = {
+  dylan: {
+    label: "Dylan",
+    prefix: "DYLAN",
+    email: "dylan@thesnuslife.com",
+    color: "#3b82f6"
+  },
+  john: {
+    label: "John",
+    prefix: "JOHN",
+    email: "john@thesnuslife.com",
+    color: "#0ea5a3"
+  }
 };
+
+const alignedPersonalColor = "#7c3aed";
+const brandColor = "#bfdbfe";
+const campaignColor = "#bbf7d0";
+const taskColor = "#facc15";
+const defaultEventColor = "#fca5a5";
 
 function getDynamicEventTitleFontSize(title: string) {
   const length = title.trim().length;
 
-  if (length <= 12) {
-    return "1rem";
-  }
-
-  if (length <= 20) {
-    return "0.9rem";
+  if (length <= 18) {
+    return "1.05rem";
   }
 
   if (length <= 30) {
-    return "0.82rem";
+    return "0.95rem";
   }
 
-  if (length <= 42) {
-    return "0.74rem";
+  if (length <= 44) {
+    return "0.85rem";
   }
 
-  return "0.68rem";
-}
-
-function renderCalendarEventContent(argument: EventContentArg) {
-  const titleSize = getDynamicEventTitleFontSize(argument.event.title ?? "");
-
-  return (
-    <div className="flex h-full w-full flex-col overflow-hidden leading-tight">
-      {argument.timeText ? (
-        <span className="truncate font-semibold" style={{ fontSize: "0.68rem", lineHeight: 1.1 }}>
-          {argument.timeText}
-        </span>
-      ) : null}
-      <span
-        className="font-semibold"
-        style={{
-          fontSize: titleSize,
-          lineHeight: 1.12,
-          overflowWrap: "anywhere",
-          wordBreak: "break-word"
-        }}
-      >
-        {argument.event.title}
-      </span>
-    </div>
-  );
+  return "0.75rem";
 }
 
 function toLocalInputValue(isoDate: string) {
@@ -127,31 +141,80 @@ function fromLocalInputValue(localDateTime: string) {
 }
 
 function toLocalDateValue(isoDate: string) {
-  const date = new Date(isoDate);
-  const offset = date.getTimezoneOffset();
-  const localDate = new Date(date.getTime() - offset * 60 * 1000);
-  return localDate.toISOString().slice(0, 10);
+  return toLocalInputValue(isoDate).slice(0, 10);
 }
 
-function fromLocalDateStart(dateValue: string) {
-  return new Date(`${dateValue}T00:00`).toISOString();
+function fromLocalDateValue(localDate: string) {
+  return new Date(`${localDate}T00:00:00`).toISOString();
 }
 
-function addDays(isoDate: string, days: number) {
-  const next = new Date(isoDate);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next.toISOString();
+function uniqueEmails(values: string[]) {
+  return [...new Set(values.map((value) => value.trim().toLowerCase()).filter(Boolean))];
 }
 
-function buildAllDayRange(startDate: string, durationDays: number) {
-  const normalizedDuration = Math.max(1, durationDays);
-  const startsAt = fromLocalDateStart(startDate);
-  const endsAt = addDays(startsAt, normalizedDuration);
-  return { startsAt, endsAt };
+function localPart(email: string) {
+  return email.split("@")[0]?.toLowerCase() ?? "";
 }
 
-function blankMeetingForm(dateValue?: Date): MeetingFormState {
+function includesOwner(event: CalendarEvent, owner: PersonalCalendarOwner) {
+  if (event.personalOwner === owner) {
+    return true;
+  }
+
+  return event.attendees.some((attendee) => localPart(attendee.email) === owner);
+}
+
+function hasBothOwners(event: CalendarEvent) {
+  return includesOwner(event, "dylan") && includesOwner(event, "john");
+}
+
+function getOtherOwner(owner: PersonalCalendarOwner) {
+  return owner === "dylan" ? "john" : "dylan";
+}
+
+function getPersonalPrefix(event: CalendarEvent) {
+  if (hasBothOwners(event)) {
+    return "DYLAN + JOHN";
+  }
+
+  if (includesOwner(event, "dylan")) {
+    return personalDirectory.dylan.prefix;
+  }
+
+  if (includesOwner(event, "john")) {
+    return personalDirectory.john.prefix;
+  }
+
+  return "TEAM";
+}
+
+function getViewTitle(scope: CalendarScope) {
+  if (scope === "personal") {
+    return "Personal Calendar";
+  }
+
+  if (scope === "brand-campaign") {
+    return "Brand & Campaign Calendar";
+  }
+
+  return "Main Calendar";
+}
+
+function getCreateButtonLabel(scope: CalendarScope) {
+  if (scope === "personal") {
+    return "Create Personal Entry";
+  }
+
+  if (scope === "brand-campaign") {
+    return "Create Brand/Campaign";
+  }
+
+  return "Create Meeting";
+}
+
+function blankEventForm(dateValue: Date | undefined, scope: CalendarScope, owner: PersonalOwnerFilter): EventFormState {
   const start = dateValue ? new Date(dateValue) : new Date();
+
   if (!dateValue) {
     start.setMinutes(0, 0, 0);
     start.setHours(start.getHours() + 1);
@@ -164,121 +227,172 @@ function blankMeetingForm(dateValue?: Date): MeetingFormState {
 
   return {
     id: null,
-    eventType: "meeting",
     title: "",
     description: "",
     location: "",
     meetingLink: "",
     internalNotes: "",
-    status: "planned" as MeetingStatus,
+    status: "planned",
+    eventType: scope === "brand-campaign" ? "event" : "meeting",
+    calendarScope: scope,
+    personalOwner: owner === "all" ? "dylan" : owner,
+    brandCampaignType: "campaign",
     startsAt: toLocalInputValue(start.toISOString()),
     endsAt: toLocalInputValue(end.toISOString()),
     startDate: toLocalDateValue(start.toISOString()),
     durationDays: "1",
-    attendeeEmails: ""
-  };
-}
-
-function blankEventForm(dateValue?: Date): MeetingFormState {
-  const start = dateValue ? new Date(dateValue) : new Date();
-  start.setHours(0, 0, 0, 0);
-
-  return {
-    ...blankMeetingForm(start),
-    eventType: "event",
-    location: "",
-    meetingLink: "",
     attendeeEmails: "",
-    startDate: toLocalDateValue(start.toISOString()),
-    durationDays: "3"
+    includeBoth: false,
+    notifyBoth: false
   };
 }
 
-function blankTaskForm(dateValue?: Date): MeetingFormState {
-  const start = dateValue ? new Date(dateValue) : new Date();
-  start.setHours(0, 0, 0, 0);
-
-  return {
-    ...blankMeetingForm(start),
-    eventType: "task",
-    location: "",
-    meetingLink: "",
-    attendeeEmails: "",
-    startDate: toLocalDateValue(start.toISOString()),
-    durationDays: "1"
-  };
-}
-
-function mapEventToForm(event: CalendarEvent): MeetingFormState {
-  const allDayDurationDays = Math.max(
+function mapEventToForm(event: CalendarEvent): EventFormState {
+  const dayLength = Math.max(
     1,
-    Math.round((new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime()) / MS_DAY)
+    Math.round((new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime()) / (24 * 60 * 60 * 1000))
   );
 
   return {
     id: event.id,
-    eventType: event.eventType,
     title: event.title,
     description: event.description ?? "",
     location: event.location ?? "",
     meetingLink: event.meetingLink ?? "",
     internalNotes: event.internalNotes ?? "",
     status: event.status,
+    eventType: event.eventType,
+    calendarScope: event.calendarScope,
+    personalOwner: event.personalOwner ?? "dylan",
+    brandCampaignType: event.brandCampaignType ?? "campaign",
     startsAt: toLocalInputValue(event.startsAt),
     endsAt: toLocalInputValue(event.endsAt),
     startDate: toLocalDateValue(event.startsAt),
-    durationDays: String(allDayDurationDays),
-    attendeeEmails: event.attendees.map((attendee) => attendee.email).join(", ")
+    durationDays: `${dayLength}`,
+    attendeeEmails: event.attendees.map((attendee) => attendee.email).join(", "),
+    includeBoth: hasBothOwners(event),
+    notifyBoth: event.notifyBoth
   };
 }
 
-export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClientProps) {
+function applyFallbackEnd(start: Date, end: Date | null, scope: CalendarScope) {
+  if (end) {
+    return end;
+  }
+
+  const fallback = new Date(start);
+  if (scope === "brand-campaign") {
+    fallback.setDate(fallback.getDate() + 1);
+  } else {
+    fallback.setHours(fallback.getHours() + 1);
+  }
+
+  return fallback;
+}
+
+export function CalendarDashboardClient({
+  initialEvents,
+  initialView = "main"
+}: CalendarDashboardClientProps) {
   const [events, setEvents] = useState(initialEvents);
   const [selectedStatuses, setSelectedStatuses] = useState<MeetingStatus[]>(statusOptions);
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit">("create");
-  const [formState, setFormState] = useState<MeetingFormState>(blankMeetingForm());
+  const [activeView] = useState<CalendarScope>(initialView);
+  const [personalOwnerFilter, setPersonalOwnerFilter] = useState<PersonalOwnerFilter>("all");
+  const [formState, setFormState] = useState<EventFormState>(
+    blankEventForm(undefined, initialView, "all")
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const calendarEvents: EventInput[] = useMemo(
+  const filteredEventsByView = useMemo(
     () =>
       events
-        .filter((event) =>
-          event.eventType === "meeting" ? selectedStatuses.includes(event.status) : true
-        )
-        .map((event) => ({
+        .filter((event) => selectedStatuses.includes(event.status))
+        .filter((event) => {
+          if (activeView === "personal") {
+            if (event.calendarScope !== "personal") {
+              return false;
+            }
+
+            if (personalOwnerFilter === "all") {
+              return true;
+            }
+
+            return includesOwner(event, personalOwnerFilter);
+          }
+
+          if (activeView === "brand-campaign") {
+            return event.calendarScope === "brand-campaign";
+          }
+
+          return event.calendarScope === "main" || event.calendarScope === "personal";
+        }),
+    [events, selectedStatuses, activeView, personalOwnerFilter]
+  );
+
+  const calendarEvents: EventInput[] = useMemo(
+    () =>
+      filteredEventsByView.map((event) => {
+        const sharedPersonal = event.calendarScope === "personal" && hasBothOwners(event);
+        const personalColor =
+          sharedPersonal
+            ? alignedPersonalColor
+            : includesOwner(event, "john")
+              ? personalDirectory.john.color
+              : personalDirectory.dylan.color;
+
+        const backgroundColor =
+          event.calendarScope === "brand-campaign"
+            ? event.brandCampaignType === "brand"
+              ? brandColor
+              : campaignColor
+            : event.calendarScope === "personal"
+              ? personalColor
+              : event.eventType === "task"
+                ? taskColor
+                : event.eventType === "event"
+                  ? defaultEventColor
+                  : statusColorMap[event.status];
+
+        const textColor =
+          event.calendarScope === "brand-campaign" || event.eventType === "task" ? "#0f172a" : "#ffffff";
+
+        const title =
+          activeView === "main" && event.calendarScope === "personal"
+            ? `${getPersonalPrefix(event)} · ${event.title}`
+            : event.title;
+
+        return {
           id: event.id,
-          title: event.title,
+          title,
           start: event.startsAt,
           end: event.endsAt,
-          allDay: event.allDay,
-          backgroundColor:
-            event.eventType === "meeting"
-              ? statusColorMap[event.status]
-              : nonMeetingColorMap[event.eventType].bg,
-          borderColor:
-            event.eventType === "meeting"
-              ? statusColorMap[event.status]
-              : nonMeetingColorMap[event.eventType].border,
-          textColor: event.eventType === "meeting" ? "#ffffff" : nonMeetingColorMap[event.eventType].text,
-          durationEditable: event.eventType !== "task",
+          allDay: event.calendarScope === "brand-campaign",
+          backgroundColor,
+          borderColor: backgroundColor,
+          textColor,
           extendedProps: { event }
-        })),
-    [events, selectedStatuses]
+        };
+      }),
+    [filteredEventsByView, activeView]
   );
 
-  const upcomingMeetings = useMemo(
+  const upcomingEntries = useMemo(
     () =>
-      [...events]
-        .filter((event) => event.eventType === "meeting" && new Date(event.endsAt) > new Date())
+      [...filteredEventsByView]
+        .filter((event) => new Date(event.endsAt) > new Date())
         .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
         .slice(0, 8),
-    [events]
+    [filteredEventsByView]
   );
 
-  async function fetchEvents() {
-    const response = await fetch("/api/calendar/events");
+  async function fetchEvents(statuses: MeetingStatus[]) {
+    const params = new URLSearchParams();
+    params.set("statuses", statuses.join(","));
+
+    const response = await fetch(`/api/calendar/events?${params.toString()}`);
     if (!response.ok) {
       throw new Error("Could not load calendar events.");
     }
@@ -287,12 +401,12 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
     setEvents(payload.events);
   }
 
-  async function refreshEvents() {
+  async function refreshEvents(nextStatuses = selectedStatuses) {
     setLoading(true);
     setError(null);
 
     try {
-      await fetchEvents();
+      await fetchEvents(nextStatuses);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Failed to refresh calendar events.");
     } finally {
@@ -301,7 +415,9 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
   }
 
   function handleDateClick(argument: DateClickArg) {
-    openCreateForm("meeting", argument.date);
+    setFormMode("create");
+    setFormState(blankEventForm(argument.date, activeView, personalOwnerFilter));
+    setFormOpen(true);
   }
 
   function handleEventClick(argument: EventClickArg) {
@@ -316,42 +432,23 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
   }
 
   async function handleEventMove({
-    event,
-    revert
+    id,
+    start,
+    end,
+    revert,
+    eventData
   }: {
-    event: EventDropArg["event"] | EventResizeDoneArg["event"];
+    id: string;
+    start: Date | null;
+    end: Date | null;
     revert: () => void;
+    eventData: CalendarEvent | undefined;
   }) {
-    const sourceEvent = event.extendedProps.event as CalendarEvent | undefined;
-    if (!event.id || !event.start) {
+    if (!id || !start || !eventData) {
       return;
     }
 
-    let nextStart = new Date(event.start);
-    let nextEnd = event.end ? new Date(event.end) : null;
-
-    if (sourceEvent?.eventType !== "meeting") {
-      const currentDurationDays = Math.max(
-        1,
-        Math.round(
-          (new Date(sourceEvent?.endsAt ?? nextStart).getTime() -
-            new Date(sourceEvent?.startsAt ?? nextStart).getTime()) /
-            MS_DAY
-        )
-      );
-
-      nextStart.setHours(0, 0, 0, 0);
-      const movedDurationDays =
-        nextEnd && event.start
-          ? Math.max(1, Math.round((nextEnd.getTime() - event.start.getTime()) / MS_DAY))
-          : currentDurationDays;
-      const durationDays = sourceEvent?.eventType === "task" ? 1 : movedDurationDays;
-      nextEnd = new Date(nextStart);
-      nextEnd.setDate(nextEnd.getDate() + durationDays);
-    } else if (!nextEnd) {
-      nextEnd = new Date(nextStart);
-      nextEnd.setHours(nextEnd.getHours() + 1);
-    }
+    const resolvedEnd = applyFallbackEnd(start, end, eventData.calendarScope);
 
     const response = await fetch("/api/calendar/events", {
       method: "PUT",
@@ -359,16 +456,16 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        id: event.id,
+        id,
         mode: "timing",
-        startsAt: nextStart.toISOString(),
-        endsAt: nextEnd.toISOString()
+        startsAt: start.toISOString(),
+        endsAt: resolvedEnd.toISOString()
       })
     });
 
     if (!response.ok) {
       revert();
-      setError("Could not move calendar item. Please try again.");
+      setError("Could not move entry. Please try again.");
       return;
     }
 
@@ -377,121 +474,90 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
 
   async function handleEventDrop(argument: EventDropArg) {
     await handleEventMove({
-      event: argument.event,
-      revert: argument.revert
+      id: argument.event.id,
+      start: argument.event.start,
+      end: argument.event.end,
+      revert: argument.revert,
+      eventData: argument.event.extendedProps.event as CalendarEvent | undefined
     });
   }
 
   async function handleEventResize(argument: EventResizeDoneArg) {
     await handleEventMove({
-      event: argument.event,
-      revert: argument.revert
+      id: argument.event.id,
+      start: argument.event.start,
+      end: argument.event.end,
+      revert: argument.revert,
+      eventData: argument.event.extendedProps.event as CalendarEvent | undefined
     });
   }
 
-  function openCreateForm(eventType: CalendarEventType, dateValue?: Date) {
-    setFormMode("create");
-
-    if (eventType === "meeting") {
-      setFormState(blankMeetingForm(dateValue));
-    } else if (eventType === "event") {
-      setFormState(blankEventForm(dateValue));
-    } else {
-      setFormState(blankTaskForm(dateValue));
-    }
-
-    setFormOpen(true);
-  }
-
-  function updateField(field: keyof MeetingFormState, value: string) {
+  function updateField(field: keyof EventFormState, value: string | boolean) {
     setFormState((previous) => ({ ...previous, [field]: value }));
-  }
-
-  const isMeetingForm = formState.eventType === "meeting";
-  const isCampaignEventForm = formState.eventType === "event";
-  const isTaskForm = formState.eventType === "task";
-
-  const formTitle =
-    formMode === "create"
-      ? formState.eventType === "meeting"
-        ? "Create Meeting"
-        : formState.eventType === "event"
-          ? "Create Event"
-          : "Add Task"
-      : formState.eventType === "meeting"
-        ? "Edit Meeting"
-        : formState.eventType === "event"
-          ? "Edit Event"
-          : "Edit Task";
-
-  const formDescription = isMeetingForm
-    ? "Capture full meeting details, attendees, link and internal notes."
-    : isCampaignEventForm
-      ? "Create a multi-day event block. Meetings can still be scheduled inside those days."
-      : "Create a task item that can be moved to different days in week/month view.";
-
-  function buildPayloadFromFormState() {
-    const attendeeEmails = isMeetingForm
-      ? formState.attendeeEmails
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean)
-      : [];
-
-    if (isMeetingForm) {
-      return {
-        eventType: "meeting" as const,
-        title: formState.title,
-        description: formState.description,
-        location: formState.location,
-        meetingLink: formState.meetingLink,
-        internalNotes: formState.internalNotes,
-        status: formState.status,
-        allDay: false,
-        startsAt: fromLocalInputValue(formState.startsAt),
-        endsAt: fromLocalInputValue(formState.endsAt),
-        attendeeEmails
-      };
-    }
-
-    const durationDays = isTaskForm ? 1 : Math.max(1, Number.parseInt(formState.durationDays || "1", 10) || 1);
-    const { startsAt, endsAt } = buildAllDayRange(formState.startDate, durationDays);
-
-    return {
-      eventType: formState.eventType,
-      title: formState.title,
-      description: formState.description,
-      location: isCampaignEventForm ? formState.location : "",
-      meetingLink: "",
-      internalNotes: formState.internalNotes,
-      status: formState.status,
-      allDay: true,
-      startsAt,
-      endsAt,
-      attendeeEmails
-    };
   }
 
   async function submitForm() {
     if (!formState.title.trim()) {
-      setError("Title is required.");
+      setError("Entry title is required.");
       return;
     }
 
-    if (!isMeetingForm && !formState.startDate) {
-      setError("Please select a date.");
-      return;
+    const calendarScope = formState.calendarScope;
+    const eventType = calendarScope === "brand-campaign" ? "event" : formState.eventType;
+
+    let startsAt = formState.startsAt;
+    let endsAt = formState.endsAt;
+
+    if (calendarScope === "brand-campaign") {
+      if (!formState.startDate) {
+        setError("Start date is required for brand/campaign entries.");
+        return;
+      }
+
+      const durationDays = Math.max(1, Number.parseInt(formState.durationDays || "1", 10));
+      const start = new Date(fromLocalDateValue(formState.startDate));
+      const end = new Date(start);
+      end.setDate(end.getDate() + durationDays);
+
+      startsAt = toLocalInputValue(start.toISOString());
+      endsAt = toLocalInputValue(end.toISOString());
     }
 
-    const payload = buildPayloadFromFormState();
-    if (!payload.startsAt || !payload.endsAt || Number.isNaN(new Date(payload.startsAt).getTime()) || Number.isNaN(new Date(payload.endsAt).getTime())) {
-      setError("Invalid date/time values.");
-      return;
+    const attendeeEmails = uniqueEmails(
+      formState.attendeeEmails
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+    );
+
+    if (calendarScope === "personal") {
+      const ownerEmail = personalDirectory[formState.personalOwner].email;
+      attendeeEmails.push(ownerEmail);
+
+      if (formState.includeBoth || formState.notifyBoth) {
+        attendeeEmails.push(personalDirectory[getOtherOwner(formState.personalOwner)].email);
+      }
     }
-    if (new Date(payload.endsAt) <= new Date(payload.startsAt)) {
-      setError("End must be after start.");
-      return;
-    }
+
+    const dedupedAttendees = uniqueEmails(attendeeEmails);
+
+    const payload = {
+      title: formState.title,
+      description: formState.description,
+      location: formState.location,
+      meetingLink: formState.meetingLink,
+      internalNotes: formState.internalNotes,
+      status: formState.status,
+      eventType,
+      allDay: calendarScope === "brand-campaign",
+      calendarScope,
+      personalOwner: calendarScope === "personal" ? formState.personalOwner : null,
+      brandCampaignType: calendarScope === "brand-campaign" ? formState.brandCampaignType : null,
+      notifyBoth: calendarScope === "personal" ? formState.notifyBoth : false,
+      startsAt: fromLocalInputValue(startsAt),
+      endsAt: fromLocalInputValue(endsAt),
+      attendeeEmails: dedupedAttendees
+    };
 
     setLoading(true);
     setError(null);
@@ -526,10 +592,10 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
       }
 
       setFormOpen(false);
-      setFormState(blankMeetingForm());
+      setFormState(blankEventForm(undefined, activeView, personalOwnerFilter));
       await refreshEvents();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Calendar save failed.");
+      setError(requestError instanceof Error ? requestError.message : "Entry save failed.");
     } finally {
       setLoading(false);
     }
@@ -553,7 +619,7 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
       }
 
       setFormOpen(false);
-      setFormState(blankMeetingForm());
+      setFormState(blankEventForm(undefined, activeView, personalOwnerFilter));
       await refreshEvents();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not delete entry.");
@@ -562,7 +628,7 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
     }
   }
 
-  function toggleStatus(status: MeetingStatus) {
+  async function toggleStatus(status: MeetingStatus) {
     const nextStatuses = selectedStatuses.includes(status)
       ? selectedStatuses.filter((item) => item !== status)
       : [...selectedStatuses, status];
@@ -572,14 +638,44 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
     }
 
     setSelectedStatuses(nextStatuses);
+    await refreshEvents(nextStatuses);
   }
+
+  function renderCalendarEventContent(argument: EventContentArg) {
+    const titleSize = getDynamicEventTitleFontSize(argument.event.title);
+
+    return (
+      <div className="h-full w-full overflow-hidden px-1 py-0.5">
+        {argument.timeText ? (
+          <div className="truncate text-[0.72rem] leading-tight" style={{ color: argument.textColor ?? "#ffffff" }}>
+            {argument.timeText}
+          </div>
+        ) : null}
+        <div
+          className="line-clamp-3 break-words leading-tight"
+          style={{
+            fontSize: titleSize,
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            color: argument.textColor ?? "#ffffff"
+          }}
+        >
+          {argument.event.title}
+        </div>
+      </div>
+    );
+  }
+
+  const viewSubtitle =
+    activeView === "personal"
+      ? "Separate Dylan and John calendars with shared scheduling + alignment controls."
+      : activeView === "brand-campaign"
+        ? "Light blue blocks for brand activity and light green blocks for campaigns across selected days."
+        : "Main operational calendar with personal entries mirrored in-line for alignment.";
 
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.7fr_0.8fr]">
-      <CalendarShell
-        title="Meeting Calendar"
-        subtitle="Create meetings, multi-day events and movable tasks with drag/drop support."
-      >
+      <CalendarShell title={getViewTitle(activeView)} subtitle={viewSubtitle}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2">
             {statusOptions.map((status) => (
@@ -593,16 +689,35 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
               </Button>
             ))}
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => openCreateForm("meeting")}>Create Meeting</Button>
-            <Button variant="secondary" onClick={() => openCreateForm("event")}>
-              Create Event
-            </Button>
-            <Button variant="outline" onClick={() => openCreateForm("task")}>
-              Add Task
-            </Button>
-          </div>
+          <Button
+            onClick={() => {
+              setFormMode("create");
+              setFormState(blankEventForm(undefined, activeView, personalOwnerFilter));
+              setFormOpen(true);
+            }}
+          >
+            {getCreateButtonLabel(activeView)}
+          </Button>
         </div>
+
+        {activeView === "personal" ? (
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-muted/35 px-3 py-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Show</span>
+            <Select
+              value={personalOwnerFilter}
+              onValueChange={(value) => setPersonalOwnerFilter(value as PersonalOwnerFilter)}
+            >
+              <SelectTrigger className="w-[220px] bg-background">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Both Personal Calendars</SelectItem>
+                <SelectItem value="dylan">Dylan Calendar</SelectItem>
+                <SelectItem value="john">John Calendar</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
 
         {error ? (
           <p className="mb-4 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
@@ -612,7 +727,7 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
           <div className="min-w-[900px]">
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView="timeGridWeek"
+              initialView={activeView === "brand-campaign" ? "dayGridMonth" : "timeGridWeek"}
               headerToolbar={{
                 left: "prev,next today",
                 center: "title",
@@ -621,14 +736,13 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
               editable
               selectable
               dayMaxEvents
-              eventOverlap
               eventDrop={handleEventDrop}
               eventResize={handleEventResize}
               dateClick={handleDateClick}
               eventClick={handleEventClick}
               eventContent={renderCalendarEventContent}
-              eventDidMount={(info) => {
-                info.el.title = info.event.title;
+              eventDidMount={(eventInfo) => {
+                eventInfo.el.title = eventInfo.event.title;
               }}
               events={calendarEvents}
               slotMinTime="06:00:00"
@@ -640,28 +754,38 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
       </CalendarShell>
 
       <div className="space-y-6">
-        <CalendarShell title="Upcoming Meetings">
+        <CalendarShell title="Upcoming Entries">
           <div className="space-y-3">
-            {upcomingMeetings.length ? (
-              upcomingMeetings.map((meeting) => (
-                <div key={meeting.id} className="rounded-xl border border-border/70 bg-muted/40 px-3 py-3">
-                  <p className="text-sm font-semibold text-foreground">{meeting.title}</p>
-                  <RangeLabel label={meeting.status} />
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {new Date(meeting.startsAt).toLocaleString()} - {new Date(meeting.endsAt).toLocaleTimeString()}
+            {upcomingEntries.length ? (
+              upcomingEntries.map((entry) => (
+                <div key={entry.id} className="rounded-xl border border-border/70 bg-muted/40 px-3 py-3">
+                  <p className="text-sm font-semibold text-foreground">
+                    {entry.calendarScope === "personal" ? `${getPersonalPrefix(entry)} · ${entry.title}` : entry.title}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">{meeting.location ?? "No location"}</p>
+                  <RangeLabel label={entry.status} />
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {new Date(entry.startsAt).toLocaleString()} - {new Date(entry.endsAt).toLocaleTimeString()}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {entry.location ??
+                      (entry.calendarScope === "brand-campaign"
+                        ? entry.brandCampaignType === "brand"
+                          ? "Brand activity"
+                          : "Campaign window"
+                        : "No location")}
+                  </p>
                 </div>
               ))
             ) : (
-              <EmptyState message="No upcoming meetings in this filter." />
+              <EmptyState message="No upcoming entries in this filter." />
             )}
           </div>
         </CalendarShell>
 
         <CalendarShell title="Filter Summary">
           <p className="text-sm text-muted-foreground">
-            Showing {calendarEvents.length} entries. Meeting status filters affect meetings only.
+            Showing {calendarEvents.length} entries in {getViewTitle(activeView)} across {selectedStatuses.length} status
+            filters.
           </p>
           {loading ? <p className="mt-2 text-xs text-muted-foreground">Refreshing calendar...</p> : null}
         </CalendarShell>
@@ -670,50 +794,28 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{formTitle}</DialogTitle>
-            <DialogDescription>{formDescription}</DialogDescription>
+            <DialogTitle>{formMode === "create" ? "Create Entry" : "Edit Entry"}</DialogTitle>
+            <DialogDescription>
+              {formState.calendarScope === "brand-campaign"
+                ? "Schedule brand or campaign blocks that span one or many days."
+                : formState.calendarScope === "personal"
+                  ? "Personal scheduling for Dylan and John, with optional shared attendance."
+                  : "Main operations scheduling with attendees, links, and notes."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="grid max-h-[70vh] gap-4 overflow-y-auto pr-2 md:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="entryType">Type</Label>
-              <Select
-                value={formState.eventType}
-                onValueChange={(value) => updateField("eventType", value as CalendarEventType)}
-                disabled={formMode === "edit"}
-              >
-                <SelectTrigger id="entryType">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {calendarEventTypeOptions.map((eventType) => (
-                    <SelectItem key={eventType} value={eventType}>
-                      {eventType}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="space-y-1.5 md:col-span-2">
-              <Label htmlFor="title">
-                {isMeetingForm ? "Meeting Title" : isCampaignEventForm ? "Event Title" : "Task Title"}
-              </Label>
+              <Label htmlFor="title">Title</Label>
               <Input
                 id="title"
                 value={formState.title}
                 onChange={(event) => updateField("title", event.target.value)}
-                placeholder={
-                  isMeetingForm
-                    ? "Weekly Growth Standup"
-                    : isCampaignEventForm
-                      ? "Campaign Launch Event"
-                      : "Review landing page copy"
-                }
+                placeholder="Weekly Growth Standup"
               />
             </div>
 
-            {isMeetingForm ? (
+            {formState.calendarScope !== "brand-campaign" ? (
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="startsAt">Start</Label>
@@ -733,6 +835,130 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
                     onChange={(event) => updateField("endsAt", event.target.value)}
                   />
                 </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="startDate">Start Date</Label>
+                  <Input
+                    id="startDate"
+                    type="date"
+                    value={formState.startDate}
+                    onChange={(event) => updateField("startDate", event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="durationDays">Duration (days)</Label>
+                  <Input
+                    id="durationDays"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={formState.durationDays}
+                    onChange={(event) => updateField("durationDays", event.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="status">Status</Label>
+              <Select value={formState.status} onValueChange={(value) => updateField("status", value)}>
+                <SelectTrigger id="status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusOptions.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {formState.calendarScope === "brand-campaign" ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="brandCampaignType">Entry Type</Label>
+                <Select
+                  value={formState.brandCampaignType}
+                  onValueChange={(value) => updateField("brandCampaignType", value)}
+                >
+                  <SelectTrigger id="brandCampaignType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="campaign">Campaign (light green)</SelectItem>
+                    <SelectItem value="brand">Brand (light blue)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="eventType">Entry Type</Label>
+                <Select value={formState.eventType} onValueChange={(value) => updateField("eventType", value)}>
+                  <SelectTrigger id="eventType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {eventTypeOptions.map((eventType) => (
+                      <SelectItem key={eventType} value={eventType}>
+                        {eventType}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {formState.calendarScope === "personal" ? (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="owner">Personal Calendar Owner</Label>
+                  <Select value={formState.personalOwner} onValueChange={(value) => updateField("personalOwner", value)}>
+                    <SelectTrigger id="owner">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="dylan">Dylan</SelectItem>
+                      <SelectItem value="john">John</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="attendees">Attendees (comma separated emails)</Label>
+                  <Input
+                    id="attendees"
+                    value={formState.attendeeEmails}
+                    onChange={(event) => updateField("attendeeEmails", event.target.value)}
+                    placeholder="ops@thesnuslife.com"
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={formState.includeBoth}
+                      onChange={(event) => updateField("includeBoth", event.target.checked)}
+                      className="h-4 w-4 rounded border-border"
+                    />
+                    Include both Dylan and John on this entry.
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={formState.notifyBoth}
+                      onChange={(event) => updateField("notifyBoth", event.target.checked)}
+                      className="h-4 w-4 rounded border-border"
+                    />
+                    Notify both users (stores shared-notify intent on this entry).
+                  </label>
+                </div>
+              </>
+            ) : null}
+
+            {formState.calendarScope !== "personal" && formState.calendarScope !== "brand-campaign" ? (
+              <>
                 <div className="space-y-1.5">
                   <Label htmlFor="location">Location</Label>
                   <Input
@@ -761,50 +987,20 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
                   />
                 </div>
               </>
-            ) : (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="startDate">Start Date</Label>
-                  <Input
-                    id="startDate"
-                    type="date"
-                    value={formState.startDate}
-                    onChange={(event) => updateField("startDate", event.target.value)}
-                  />
-                </div>
-                {isCampaignEventForm ? (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="durationDays">Duration (days)</Label>
-                    <Input
-                      id="durationDays"
-                      type="number"
-                      min={1}
-                      value={formState.durationDays}
-                      onChange={(event) => updateField("durationDays", event.target.value)}
-                    />
-                  </div>
-                ) : null}
-              </>
-            )}
+            ) : null}
 
-            <div className="space-y-1.5 md:col-span-2">
-              <Label htmlFor="status">Status</Label>
-              <Select
-                value={formState.status}
-                onValueChange={(value) => updateField("status", value as MeetingStatus)}
-              >
-                <SelectTrigger id="status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {statusOptions.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {status}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {formState.calendarScope === "brand-campaign" ? (
+              <div className="space-y-1.5 md:col-span-2">
+                <Label htmlFor="location">Campaign / Brand Context</Label>
+                <Input
+                  id="location"
+                  value={formState.location}
+                  onChange={(event) => updateField("location", event.target.value)}
+                  placeholder="Website banner, launch page, PDP refresh, etc."
+                />
+              </div>
+            ) : null}
+
             <div className="space-y-1.5 md:col-span-2">
               <Label htmlFor="description">Description</Label>
               <Textarea
@@ -835,15 +1031,7 @@ export function CalendarDashboardClient({ initialEvents }: CalendarDashboardClie
               Cancel
             </Button>
             <Button onClick={submitForm} disabled={loading}>
-              {loading
-                ? "Saving..."
-                : formMode === "create"
-                  ? isMeetingForm
-                    ? "Create Meeting"
-                    : isCampaignEventForm
-                      ? "Create Event"
-                      : "Add Task"
-                  : "Save Changes"}
+              {loading ? "Saving..." : formMode === "create" ? "Create Entry" : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

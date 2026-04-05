@@ -5,95 +5,144 @@ import { formatISO, isAfter, isBefore, parseISO } from "date-fns";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { seededCalendarEvents } from "@/server/data/calendar";
 import type {
+  BrandCampaignType,
+  CalendarScope,
   CalendarEvent,
   CalendarEventInput,
-  CalendarEventType,
-  CalendarFilters
+  CalendarFilters,
+  CalendarItemType,
+  PersonalCalendarOwner
 } from "@/types/calendar";
 
 let inMemoryCalendarEvents: CalendarEvent[] = structuredClone(seededCalendarEvents);
-const META_PREFIX = "[[TSL_META]]";
-
-type CalendarEventMeta = {
-  eventType: CalendarEventType;
-  allDay: boolean;
-};
-
-function normalizeEventMeta(input: Partial<CalendarEventMeta> | null | undefined): CalendarEventMeta {
-  const eventType =
-    input?.eventType === "event" || input?.eventType === "task" || input?.eventType === "meeting"
-      ? input.eventType
-      : "meeting";
-  const defaultAllDay = eventType === "event" || eventType === "task";
-  const allDay = typeof input?.allDay === "boolean" ? input.allDay : defaultAllDay;
-
-  return { eventType, allDay };
-}
-
-function parseInternalNotesWithMeta(internalNotes: string | null | undefined): {
-  internalNotes: string | null;
-  meta: CalendarEventMeta;
-} {
-  if (!internalNotes) {
-    return {
-      internalNotes: null,
-      meta: normalizeEventMeta(undefined)
-    };
-  }
-
-  if (!internalNotes.startsWith(META_PREFIX)) {
-    return {
-      internalNotes,
-      meta: normalizeEventMeta(undefined)
-    };
-  }
-
-  const remainder = internalNotes.slice(META_PREFIX.length).trimStart();
-  const firstNewlineIndex = remainder.indexOf("\n");
-  const encodedMeta = firstNewlineIndex === -1 ? remainder : remainder.slice(0, firstNewlineIndex);
-  const plainNotes =
-    firstNewlineIndex === -1 ? "" : remainder.slice(firstNewlineIndex + 1).trim();
-
-  try {
-    const parsedMeta = JSON.parse(encodedMeta) as Partial<CalendarEventMeta>;
-    return {
-      internalNotes: plainNotes || null,
-      meta: normalizeEventMeta(parsedMeta)
-    };
-  } catch {
-    return {
-      internalNotes,
-      meta: normalizeEventMeta(undefined)
-    };
-  }
-}
-
-function serializeInternalNotesWithMeta(
-  internalNotes: string | undefined,
-  metaInput: Partial<CalendarEventMeta>
-) {
-  const meta = normalizeEventMeta(metaInput);
-  const plainNotes = internalNotes?.trim() ?? "";
-  const encodedMeta = JSON.stringify(meta);
-  return `${META_PREFIX}${encodedMeta}${plainNotes ? `\n${plainNotes}` : ""}`;
-}
+const metadataPrefix = "[[TSL_META]]";
+const calendarScopes: CalendarScope[] = ["main", "personal", "brand-campaign"];
+const personalOwners: PersonalCalendarOwner[] = ["dylan", "john"];
+const brandCampaignTypes: BrandCampaignType[] = ["brand", "campaign"];
 
 function displayNameFromEmail(email: string) {
   return email.split("@")[0].replace(/[._-]/g, " ");
 }
 
+function isCalendarScope(value: unknown): value is CalendarScope {
+  return typeof value === "string" && calendarScopes.includes(value as CalendarScope);
+}
+
+function isPersonalOwner(value: unknown): value is PersonalCalendarOwner {
+  return typeof value === "string" && personalOwners.includes(value as PersonalCalendarOwner);
+}
+
+function isBrandCampaignType(value: unknown): value is BrandCampaignType {
+  return typeof value === "string" && brandCampaignTypes.includes(value as BrandCampaignType);
+}
+
+function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined) {
+  const fallback = {
+    eventType: "meeting" as CalendarItemType,
+    allDay: false,
+    notes: null as string | null,
+    calendarScope: "main" as CalendarScope,
+    personalOwner: null as PersonalCalendarOwner | null,
+    brandCampaignType: null as BrandCampaignType | null,
+    notifyBoth: false
+  };
+
+  if (!rawInternalNotes) {
+    return fallback;
+  }
+
+  if (!rawInternalNotes.startsWith(metadataPrefix)) {
+    return { ...fallback, notes: rawInternalNotes };
+  }
+
+  const [metadataLine = "", ...notesLines] = rawInternalNotes.split("\n");
+  const metadataRaw = metadataLine.replace(metadataPrefix, "").trim();
+
+  try {
+    const parsed = JSON.parse(metadataRaw) as {
+      eventType?: CalendarItemType;
+      allDay?: boolean;
+      calendarScope?: CalendarScope;
+      personalOwner?: PersonalCalendarOwner | null;
+      brandCampaignType?: BrandCampaignType | null;
+      notifyBoth?: boolean;
+    };
+    const eventType: CalendarItemType =
+      parsed.eventType === "event" || parsed.eventType === "task" ? parsed.eventType : "meeting";
+    const personalOwner = isPersonalOwner(parsed.personalOwner) ? parsed.personalOwner : null;
+    const brandCampaignType = isBrandCampaignType(parsed.brandCampaignType) ? parsed.brandCampaignType : null;
+    const inferredScope: CalendarScope = brandCampaignType
+      ? "brand-campaign"
+      : personalOwner
+        ? "personal"
+        : "main";
+    const calendarScope = isCalendarScope(parsed.calendarScope) ? parsed.calendarScope : inferredScope;
+    const notes = notesLines.join("\n").trim() || null;
+
+    return {
+      eventType,
+      allDay: parsed.allDay === true,
+      notes,
+      calendarScope,
+      personalOwner,
+      brandCampaignType,
+      notifyBoth: parsed.notifyBoth === true
+    };
+  } catch {
+    return { ...fallback, notes: rawInternalNotes };
+  }
+}
+
+function buildInternalNotesPayload(
+  rawNotes: string | undefined,
+  eventType: CalendarItemType,
+  allDay: boolean,
+  calendarScope: CalendarScope,
+  personalOwner: PersonalCalendarOwner | null,
+  brandCampaignType: BrandCampaignType | null,
+  notifyBoth: boolean
+) {
+  const notes = rawNotes?.trim() || "";
+  const requiresMetadata =
+    eventType !== "meeting" ||
+    allDay ||
+    calendarScope !== "main" ||
+    personalOwner !== null ||
+    brandCampaignType !== null ||
+    notifyBoth;
+
+  if (!requiresMetadata) {
+    return notes || null;
+  }
+
+  const metadata = `${metadataPrefix}${JSON.stringify({
+    eventType,
+    allDay,
+    calendarScope,
+    personalOwner,
+    brandCampaignType,
+    notifyBoth
+  })}`;
+  return notes ? `${metadata}\n${notes}` : metadata;
+}
+
 function mapEventRow(row: any): CalendarEvent {
-  const parsed = parseInternalNotesWithMeta(row.internal_notes);
+  const normalized = parseInternalNotesMetadata(row.internal_notes);
+
   return {
     id: row.id,
-    eventType: parsed.meta.eventType,
     title: row.title,
     description: row.description,
     location: row.location,
     meetingLink: row.meeting_link,
-    internalNotes: parsed.internalNotes,
+    internalNotes: normalized.notes,
     status: row.status,
-    allDay: parsed.meta.allDay,
+    eventType: normalized.eventType,
+    allDay: normalized.allDay,
+    calendarScope: normalized.calendarScope,
+    personalOwner: normalized.personalOwner,
+    brandCampaignType: normalized.brandCampaignType,
+    notifyBoth: normalized.notifyBoth,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
     createdBy: row.created_by,
@@ -116,9 +165,8 @@ function filterByDateRange(events: CalendarEvent[], start?: string, end?: string
     }
 
     const eventStart = parseISO(event.startsAt);
-    const eventEnd = parseISO(event.endsAt);
 
-    if (start && isBefore(eventEnd, parseISO(start))) {
+    if (start && isBefore(eventStart, parseISO(start))) {
       return false;
     }
 
@@ -135,9 +183,7 @@ function filterByStatuses(events: CalendarEvent[], filters?: CalendarFilters) {
     return events;
   }
 
-  return events.filter((event) =>
-    event.eventType === "meeting" ? filters.statuses.includes(event.status) : true
-  );
+  return events.filter((event) => filters.statuses.includes(event.status));
 }
 
 async function fetchSupabaseEvents(start?: string, end?: string, filters?: CalendarFilters) {
@@ -174,16 +220,6 @@ async function fetchSupabaseEvents(start?: string, end?: string, filters?: Calen
 }
 
 export const calendarService = {
-  async getUpcomingByType(eventType: CalendarEventType, limit = 3) {
-    const events = await this.listEvents();
-    const now = new Date();
-
-    return events
-      .filter((event) => event.eventType === eventType && parseISO(event.endsAt) > now)
-      .sort((a, b) => parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime())
-      .slice(0, limit);
-  },
-
   async listEvents({ start, end, filters }: { start?: string; end?: string; filters?: CalendarFilters } = {}) {
     const supabaseEvents = await fetchSupabaseEvents(start, end, filters);
     if (supabaseEvents) {
@@ -218,7 +254,16 @@ export const calendarService = {
     return inMemoryCalendarEvents.find((event) => event.id === eventId) ?? null;
   },
 
-  async getUpcomingMeetings(limit = 5) {
+  async getUpcomingByType(eventType: CalendarItemType, limit = 3) {
+    const events = await this.listEvents();
+    const now = new Date();
+    return events
+      .filter((event) => event.eventType === eventType && parseISO(event.endsAt) > now)
+      .sort((a, b) => parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime())
+      .slice(0, limit);
+  },
+
+  async getUpcomingMeetings(limit = 3) {
     return this.getUpcomingByType("meeting", limit);
   },
 
@@ -232,10 +277,21 @@ export const calendarService = {
 
   async createEvent(input: CalendarEventInput, actorId: string) {
     const admin = createSupabaseAdminClient();
-    const normalizedMeta = normalizeEventMeta({
-      eventType: input.eventType,
-      allDay: input.allDay
-    });
+    const eventType = input.eventType ?? "meeting";
+    const allDay = input.allDay === true || input.calendarScope === "brand-campaign";
+    const calendarScope = input.calendarScope ?? "main";
+    const personalOwner = input.personalOwner ?? null;
+    const brandCampaignType = input.brandCampaignType ?? null;
+    const notifyBoth = input.notifyBoth === true;
+    const internalNotesPayload = buildInternalNotesPayload(
+      input.internalNotes,
+      eventType,
+      allDay,
+      calendarScope,
+      personalOwner,
+      brandCampaignType,
+      notifyBoth
+    );
 
     if (admin) {
       const { data: eventRow, error: eventError } = await admin
@@ -245,7 +301,7 @@ export const calendarService = {
           description: input.description ?? null,
           location: input.location ?? null,
           meeting_link: input.meetingLink ?? null,
-          internal_notes: serializeInternalNotesWithMeta(input.internalNotes, normalizedMeta),
+          internal_notes: internalNotesPayload,
           status: input.status,
           starts_at: input.startsAt,
           ends_at: input.endsAt,
@@ -287,14 +343,18 @@ export const calendarService = {
 
     const created: CalendarEvent = {
       id,
-      eventType: normalizedMeta.eventType,
       title: input.title,
       description: input.description ?? null,
       location: input.location ?? null,
       meetingLink: input.meetingLink ?? null,
       internalNotes: input.internalNotes ?? null,
       status: input.status,
-      allDay: normalizedMeta.allDay,
+      eventType,
+      allDay,
+      calendarScope,
+      personalOwner,
+      brandCampaignType,
+      notifyBoth,
       startsAt: input.startsAt,
       endsAt: input.endsAt,
       createdBy: actorId,
@@ -318,10 +378,21 @@ export const calendarService = {
 
   async updateEvent(eventId: string, input: CalendarEventInput) {
     const admin = createSupabaseAdminClient();
-    const normalizedMeta = normalizeEventMeta({
-      eventType: input.eventType,
-      allDay: input.allDay
-    });
+    const eventType = input.eventType ?? "meeting";
+    const allDay = input.allDay === true || input.calendarScope === "brand-campaign";
+    const calendarScope = input.calendarScope ?? "main";
+    const personalOwner = input.personalOwner ?? null;
+    const brandCampaignType = input.brandCampaignType ?? null;
+    const notifyBoth = input.notifyBoth === true;
+    const internalNotesPayload = buildInternalNotesPayload(
+      input.internalNotes,
+      eventType,
+      allDay,
+      calendarScope,
+      personalOwner,
+      brandCampaignType,
+      notifyBoth
+    );
 
     if (admin) {
       const { error: updateError } = await admin
@@ -331,7 +402,7 @@ export const calendarService = {
           description: input.description ?? null,
           location: input.location ?? null,
           meeting_link: input.meetingLink ?? null,
-          internal_notes: serializeInternalNotesWithMeta(input.internalNotes, normalizedMeta),
+          internal_notes: internalNotesPayload,
           status: input.status,
           starts_at: input.startsAt,
           ends_at: input.endsAt,
@@ -380,14 +451,18 @@ export const calendarService = {
       event.id === eventId
         ? {
             ...event,
-            eventType: normalizedMeta.eventType,
             title: input.title,
             description: input.description ?? null,
             location: input.location ?? null,
             meetingLink: input.meetingLink ?? null,
             internalNotes: input.internalNotes ?? null,
             status: input.status,
-            allDay: normalizedMeta.allDay,
+            eventType: input.eventType ?? event.eventType ?? "meeting",
+            allDay,
+            calendarScope,
+            personalOwner,
+            brandCampaignType,
+            notifyBoth,
             startsAt: input.startsAt,
             endsAt: input.endsAt,
             updatedAt: formatISO(new Date()),
@@ -425,6 +500,10 @@ export const calendarService = {
       status: event.status,
       eventType: event.eventType,
       allDay: event.allDay,
+      calendarScope: event.calendarScope,
+      personalOwner: event.personalOwner,
+      brandCampaignType: event.brandCampaignType,
+      notifyBoth: event.notifyBoth,
       startsAt,
       endsAt,
       attendeeEmails: event.attendees.map((attendee) => attendee.email)

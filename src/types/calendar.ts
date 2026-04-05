@@ -1,5 +1,8 @@
 export type MeetingStatus = "planned" | "confirmed" | "done" | "cancelled";
-export type CalendarEventType = "meeting" | "event" | "task";
+export type CalendarItemType = "meeting" | "event" | "task";
+export type CalendarScope = "main" | "personal" | "brand-campaign";
+export type PersonalCalendarOwner = "dylan" | "john";
+export type BrandCampaignType = "brand" | "campaign";
 
 export interface CalendarAttendee {
   id: string;
@@ -11,14 +14,18 @@ export interface CalendarAttendee {
 
 export interface CalendarEvent {
   id: string;
-  eventType: CalendarEventType;
   title: string;
   description: string | null;
   location: string | null;
   meetingLink: string | null;
   internalNotes: string | null;
   status: MeetingStatus;
+  eventType: CalendarItemType;
   allDay: boolean;
+  calendarScope: CalendarScope;
+  personalOwner: PersonalCalendarOwner | null;
+  brandCampaignType: BrandCampaignType | null;
+  notifyBoth: boolean;
   startsAt: string;
   endsAt: string;
   createdBy: string;
@@ -28,14 +35,18 @@ export interface CalendarEvent {
 }
 
 export interface CalendarEventInput {
-  eventType?: CalendarEventType;
   title: string;
   description?: string;
   location?: string;
   meetingLink?: string;
   internalNotes?: string;
   status: MeetingStatus;
+  eventType?: CalendarItemType;
   allDay?: boolean;
+  calendarScope?: CalendarScope;
+  personalOwner?: PersonalCalendarOwner | null;
+  brandCampaignType?: BrandCampaignType | null;
+  notifyBoth?: boolean;
   startsAt: string;
   endsAt: string;
   attendeeEmails: string[];
@@ -43,5 +54,4 @@ export interface CalendarEventInput {
 
 export interface CalendarFilters {
   statuses: MeetingStatus[];
-  eventTypes?: CalendarEventType[];
 }

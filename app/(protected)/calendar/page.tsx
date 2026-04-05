@@ -8,10 +8,10 @@ export default async function CalendarPage() {
   return (
     <div className="space-y-8">
       <SectionHeader
-        title="Calendar"
-        description="Operational scheduling for meetings, multi-day events and draggable day tasks."
+        title="Main Calendar"
+        description="Operational scheduling with Dylan/John personal alignment merged into the main view."
       />
-      <CalendarDashboardClient initialEvents={initialEvents} />
+      <CalendarDashboardClient initialEvents={initialEvents} initialView="main" />
     </div>
   );
 }

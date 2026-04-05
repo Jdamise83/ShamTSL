@@ -8,53 +8,49 @@ import {
   Cog,
   Factory,
   Home,
+  LayoutGrid,
   Megaphone,
-  Search,
   ShoppingBag,
+  Search,
+  Users,
   Umbrella
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-type SidebarRole = "admin" | "staff";
-
-type NavigationItem = {
-  href: string;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-  roles: SidebarRole[];
-};
-
-const allNavigation: NavigationItem[] = [
-  { href: "/home", label: "Home", icon: Home, roles: ["admin"] },
-  { href: "/calendar", label: "Calendar", icon: Calendar, roles: ["admin"] },
-  { href: "/holidays", label: "Holidays", icon: Umbrella, roles: ["admin", "staff"] },
-  { href: "/google-ads", label: "Google Ads", icon: Megaphone, roles: ["admin"] },
-  { href: "/seo", label: "SEO", icon: Search, roles: ["admin"] },
-  { href: "/ga4", label: "GA4", icon: ChartColumn, roles: ["admin"] },
-  { href: "/shopify", label: "Shopify", icon: ShoppingBag, roles: ["admin"] },
-  { href: "/unleashed", label: "Unleashed", icon: Factory, roles: ["admin"] },
-  { href: "/settings", label: "Settings", icon: Cog, roles: ["admin"] }
+const navigation = [
+  { href: "/home", label: "Home", icon: Home },
+  { href: "/calendar", label: "Main Calendar", icon: Calendar },
+  { href: "/calendar/personal", label: "Personal Calendar", icon: Users },
+  { href: "/calendar/brand-campaign", label: "Brand & Campaign Calendar", icon: LayoutGrid },
+  { href: "/holidays", label: "Holidays", icon: Umbrella },
+  { href: "/google-ads", label: "Google Ads", icon: Megaphone },
+  { href: "/seo", label: "SEO", icon: Search },
+  { href: "/ga4", label: "GA4", icon: ChartColumn },
+  { href: "/unleashed", label: "Unleashed", icon: Factory },
+  { href: "/shopify", label: "Shopify", icon: ShoppingBag },
+  { href: "/settings", label: "Settings", icon: Cog }
 ];
 
-export function SidebarNav({ role }: { role: SidebarRole }) {
+export function SidebarNav() {
   const pathname = usePathname();
-  const navigation = allNavigation.filter((item) => item.roles.includes(role));
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-72 border-r border-white/15 bg-[#0396FF] px-5 py-8 text-white lg:block">
+    <aside className="sticky top-0 hidden h-screen w-72 border-r border-border/80 bg-card px-5 py-8 lg:block">
       <div className="mb-10 px-2">
-        <img
-          src="https://cdn.shopify.com/s/files/1/0991/4689/1610/files/new_thesnuslife_logotype.svg?v=1775047239"
-          alt="The Snus Life"
-          className="h-20 w-auto"
-        />
+        <p className="font-heading text-2xl font-bold uppercase tracking-[0.12em] text-foreground">
+          The Snus Life
+        </p>
+        <p className="mt-2 text-sm text-muted-foreground">Private Operations Console</p>
       </div>
 
       <nav className="space-y-1.5">
         {navigation.map((item) => {
           const Icon = item.icon;
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+          const active =
+            item.href === "/calendar"
+              ? pathname === "/calendar"
+              : pathname === item.href || pathname.startsWith(`${item.href}/`);
 
           return (
             <Link
@@ -63,8 +59,8 @@ export function SidebarNav({ role }: { role: SidebarRole }) {
               className={cn(
                 "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors",
                 active
-                  ? "bg-white/20 text-white"
-                  : "text-white/90 hover:bg-white/15 hover:text-white"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
               )}
             >
               <Icon className="h-4 w-4" />
