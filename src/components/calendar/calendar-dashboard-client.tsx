@@ -129,6 +129,53 @@ function getDynamicEventTitleFontSize(title: string) {
   return "0.75rem";
 }
 
+function getCalendarEventTextLayout(argument: EventContentArg) {
+  const isAllDay = argument.event.allDay;
+  const titleLength = argument.event.title.trim().length;
+  const start = argument.event.start;
+  const end = argument.event.end;
+  const durationMinutes =
+    start && end ? Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000)) : 60;
+
+  if (isAllDay) {
+    return {
+      timeFontSize: "0.65rem",
+      titleFontSize: titleLength > 28 ? "0.72rem" : "0.76rem",
+      titleClamp: 2
+    };
+  }
+
+  if (durationMinutes <= 45) {
+    return {
+      timeFontSize: "0.62rem",
+      titleFontSize: titleLength > 18 ? "0.68rem" : "0.72rem",
+      titleClamp: 1
+    };
+  }
+
+  if (durationMinutes <= 75) {
+    return {
+      timeFontSize: "0.64rem",
+      titleFontSize: titleLength > 24 ? "0.7rem" : "0.74rem",
+      titleClamp: 2
+    };
+  }
+
+  if (durationMinutes <= 120) {
+    return {
+      timeFontSize: "0.68rem",
+      titleFontSize: titleLength > 28 ? "0.74rem" : "0.78rem",
+      titleClamp: 2
+    };
+  }
+
+  return {
+    timeFontSize: "0.7rem",
+    titleFontSize: getDynamicEventTitleFontSize(argument.event.title),
+    titleClamp: 3
+  };
+}
+
 function toLocalInputValue(isoDate: string) {
   const date = new Date(isoDate);
   const offset = date.getTimezoneOffset();
@@ -642,22 +689,32 @@ export function CalendarDashboardClient({
   }
 
   function renderCalendarEventContent(argument: EventContentArg) {
-    const titleSize = getDynamicEventTitleFontSize(argument.event.title);
+    const layout = getCalendarEventTextLayout(argument);
 
     return (
-      <div className="h-full w-full overflow-hidden px-1 py-0.5">
+      <div className="flex h-full w-full flex-col gap-px overflow-hidden px-1 py-[1px]">
         {argument.timeText ? (
-          <div className="truncate text-[0.72rem] leading-tight" style={{ color: argument.textColor ?? "#ffffff" }}>
+          <div
+            className="truncate leading-tight"
+            style={{
+              color: argument.textColor ?? "#ffffff",
+              fontSize: layout.timeFontSize
+            }}
+          >
             {argument.timeText}
           </div>
         ) : null}
         <div
-          className="line-clamp-3 break-words leading-tight"
+          className="break-words leading-[1.08]"
           style={{
-            fontSize: titleSize,
+            fontSize: layout.titleFontSize,
             wordBreak: "break-word",
             overflowWrap: "anywhere",
-            color: argument.textColor ?? "#ffffff"
+            color: argument.textColor ?? "#ffffff",
+            display: "-webkit-box",
+            WebkitLineClamp: layout.titleClamp,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden"
           }}
         >
           {argument.event.title}
@@ -745,6 +802,7 @@ export function CalendarDashboardClient({
                 eventInfo.el.title = eventInfo.event.title;
               }}
               events={calendarEvents}
+              eventMinHeight={34}
               slotMinTime="06:00:00"
               slotMaxTime="22:00:00"
               height="auto"
