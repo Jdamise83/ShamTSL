@@ -32,7 +32,7 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Cog }
 ];
 
-export function SidebarNav() {
+export function SidebarNav({ role: _role }: { role?: "staff" | "admin" }) {
   const pathname = usePathname();
 
   return (
