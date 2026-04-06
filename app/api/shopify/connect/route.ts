@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 
 import { NextResponse } from "next/server";
 
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+
 function readEnv(names: string[]): string {
   for (const name of names) {
     const value = process.env[name]?.trim();
@@ -11,6 +13,18 @@ function readEnv(names: string[]): string {
   }
 
   return "";
+}
+
+function resolveRequestOrigin(request: Request): string {
+  const requestUrl = new URL(request.url);
+  const forwardedHost = request.headers.get("x-forwarded-host")?.trim();
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.trim();
+
+  if (forwardedHost && forwardedProto) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  return requestUrl.origin;
 }
 
 function normalizeShopDomain(value: string): string {
@@ -53,19 +67,6 @@ function normalizeShopDomain(value: string): string {
   }
 }
 
-function resolveCanonicalOrigin(requestUrl: URL): string {
-  const configured = readEnv(["SHOPIFY_OAUTH_BASE_URL", "APP_BASE_URL"]);
-  if (!configured) {
-    return requestUrl.origin;
-  }
-
-  try {
-    return new URL(configured).origin;
-  } catch {
-    return requestUrl.origin;
-  }
-}
-
 function normalizeReturnTo(value: string, fallbackOrigin: string): string {
   const raw = value.trim();
   if (!raw) {
@@ -90,29 +91,71 @@ function errorRedirect(requestUrl: URL, message: string) {
   );
 }
 
-export async function GET(request: Request) {
-  const requestUrl = new URL(request.url);
-  const canonicalOrigin = resolveCanonicalOrigin(requestUrl);
-  const returnTo = normalizeReturnTo(
-    requestUrl.searchParams.get("return_to") ?? `${requestUrl.origin}/shopify`,
-    requestUrl.origin
-  );
+function readCookie(request: Request, name: string): string {
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const pairs = cookieHeader
+    .split(";")
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
 
-  if (requestUrl.origin !== canonicalOrigin) {
-    const relayUrl = new URL("/api/shopify/connect", canonicalOrigin);
-    relayUrl.searchParams.set("return_to", returnTo);
-    return NextResponse.redirect(relayUrl.toString());
+  for (const pair of pairs) {
+    const [cookieName, ...rest] = pair.split("=");
+    if (cookieName !== name) {
+      continue;
+    }
+
+    return decodeURIComponent(rest.join("=")).trim();
   }
 
-  const shopDomainRaw = readEnv([
-    "SHOPIFY_STORE_DOMAIN",
-    "SHOPIFY_SHOP_DOMAIN",
-    "SHOPIFY_SHOP",
-    "SHOPIFY_DOMAIN",
-    "SHOPIFY_MYSHOPIFY_DOMAIN",
-    "SHOPIFY_STORE_ID"
-  ]);
-  const shopDomain = normalizeShopDomain(shopDomainRaw);
+  return "";
+}
+
+async function readShopDomainFromSupabase(): Promise<string> {
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    return "";
+  }
+
+  const { data, error } = await supabase
+    .from("integration_secrets")
+    .select("value")
+    .eq("key", "shopify_store_domain")
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[Shopify] Could not read store domain from Supabase integration_secrets.", {
+      error: error.message
+    });
+    return "";
+  }
+
+  return typeof data?.value === "string" ? data.value.trim() : "";
+}
+
+export async function GET(request: Request) {
+  const requestUrl = new URL(request.url);
+  const requestOrigin = resolveRequestOrigin(request);
+  const returnTo = normalizeReturnTo(
+    requestUrl.searchParams.get("return_to") ?? `${requestOrigin}/shopify`,
+    requestOrigin
+  );
+
+  const shopFromQuery = normalizeShopDomain(requestUrl.searchParams.get("shop") ?? "");
+  const shopFromCookie = normalizeShopDomain(
+    readCookie(request, "shopify_store_domain") || readCookie(request, "shopify_oauth_shop")
+  );
+  const shopFromSupabase = normalizeShopDomain(await readShopDomainFromSupabase());
+  const shopFromEnv = normalizeShopDomain(
+    readEnv([
+      "SHOPIFY_STORE_DOMAIN",
+      "SHOPIFY_SHOP_DOMAIN",
+      "SHOPIFY_SHOP",
+      "SHOPIFY_DOMAIN",
+      "SHOPIFY_MYSHOPIFY_DOMAIN",
+      "SHOPIFY_STORE_ID"
+    ])
+  );
+  const shopDomain = shopFromQuery || shopFromEnv || shopFromCookie || shopFromSupabase;
   const clientId = readEnv([
     "SHOPIFY_APP_CLIENT_ID",
     "SHOPIFY_CLIENT_ID",
@@ -122,7 +165,10 @@ export async function GET(request: Request) {
   ]);
 
   if (!shopDomain) {
-    return errorRedirect(requestUrl, "Missing Shopify store domain");
+    return errorRedirect(
+      requestUrl,
+      "Missing Shopify store domain. Add ?shop=your-store.myshopify.com once to connect."
+    );
   }
 
   if (!clientId) {
@@ -133,7 +179,7 @@ export async function GET(request: Request) {
   const scopes =
     readEnv(["SHOPIFY_SCOPES"]) || "read_orders,read_customers,read_analytics";
 
-  const redirectUri = new URL("/api/shopify/callback", canonicalOrigin).toString();
+  const redirectUri = new URL("/api/shopify/callback", requestOrigin).toString();
 
   const authorizeUrl = new URL(`https://${shopDomain}/admin/oauth/authorize`);
   authorizeUrl.searchParams.set("client_id", clientId);

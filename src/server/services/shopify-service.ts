@@ -252,6 +252,42 @@ async function readShopifyAccessTokenFromSupabase(): Promise<string> {
   return typeof data?.value === "string" ? data.value.trim() : "";
 }
 
+async function readShopifyStoreDomainFromCookie(): Promise<string> {
+  try {
+    const cookieStore = await cookies();
+    const domain =
+      cookieStore.get("shopify_store_domain")?.value ??
+      cookieStore.get("shopify_oauth_shop")?.value ??
+      "";
+
+    return normalizeShopDomain(domain);
+  } catch {
+    return "";
+  }
+}
+
+async function readShopifyStoreDomainFromSupabase(): Promise<string> {
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) {
+    return "";
+  }
+
+  const { data, error } = await supabase
+    .from("integration_secrets")
+    .select("value")
+    .eq("key", "shopify_store_domain")
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[Shopify] Could not read store domain from Supabase integration_secrets.", {
+      error: error.message
+    });
+    return "";
+  }
+
+  return normalizeShopDomain(typeof data?.value === "string" ? data.value.trim() : "");
+}
+
 function getAuthFingerprint(token: string): string {
   const trimmed = token.trim();
   if (!trimmed) {
@@ -553,7 +589,7 @@ function buildData(periods: PeriodSummary[], metrics: DerivedMetrics, currency: 
   };
 }
 
-function resolveConfig(): RuntimeConfig {
+function resolveConfig(shopDomainOverride?: string): RuntimeConfig {
   const clientId = readEnv([
     "SHOPIFY_APP_CLIENT_ID",
     "SHOPIFY_CLIENT_ID",
@@ -584,7 +620,7 @@ function resolveConfig(): RuntimeConfig {
     "SHOPIFY_MYSHOPIFY_DOMAIN",
     "SHOPIFY_STORE_ID"
   ]);
-  const shopDomain = normalizeShopDomain(shopDomainRaw);
+  const shopDomain = normalizeShopDomain(shopDomainOverride || shopDomainRaw);
   const adminAccessToken = readEnv([
     "SHOPIFY_ADMIN_ACCESS_TOKEN",
     "SHOPIFY_ACCESS_TOKEN",
@@ -1378,6 +1414,30 @@ class ShopifyProviderImpl implements ShopifyProvider {
   private tokenCache: TokenCacheEntry | null = null;
   private inFlight: Promise<ShopifyData> | null = null;
 
+  private async resolveShopDomain(): Promise<string> {
+    const fromEnv = normalizeShopDomain(
+      readEnv([
+        "SHOPIFY_STORE_DOMAIN",
+        "SHOPIFY_SHOP_DOMAIN",
+        "SHOPIFY_SHOP",
+        "SHOPIFY_DOMAIN",
+        "SHOPIFY_MYSHOPIFY_DOMAIN",
+        "SHOPIFY_STORE_ID"
+      ])
+    );
+
+    if (fromEnv) {
+      return fromEnv;
+    }
+
+    const fromCookie = await readShopifyStoreDomainFromCookie();
+    if (fromCookie) {
+      return fromCookie;
+    }
+
+    return readShopifyStoreDomainFromSupabase();
+  }
+
   async getDashboardData(): Promise<ShopifyData> {
     const cookieToken = await readShopifyAccessTokenFromCookie();
     const envToken = readEnv([
@@ -1389,7 +1449,8 @@ class ShopifyProviderImpl implements ShopifyProvider {
       "SHOPIFY_PRIVATE_TOKEN"
     ]);
     const supabaseToken = await readShopifyAccessTokenFromSupabase();
-    const authFingerprint = getAuthFingerprint(cookieToken || envToken || supabaseToken);
+    const resolvedShopDomain = await this.resolveShopDomain();
+    const authFingerprint = `${resolvedShopDomain || "no-shop"}:${getAuthFingerprint(cookieToken || envToken || supabaseToken)}`;
 
     const now = Date.now();
     if (
@@ -1450,7 +1511,7 @@ class ShopifyProviderImpl implements ShopifyProvider {
 
     if (!config.allowTokenExchange) {
       throw new Error(
-        "Missing Shopify admin access token. Set SHOPIFY_ADMIN_ACCESS_TOKEN (or SHOPIFY_ADMIN_API_ACCESS_TOKEN)."
+        "Missing Shopify OAuth access token. Click 'Connect Shopify' once to generate/store token from client ID + client secret."
       );
     }
 
@@ -1460,7 +1521,8 @@ class ShopifyProviderImpl implements ShopifyProvider {
   }
 
   private async loadFresh(): Promise<ShopifyData> {
-    const config = resolveConfig();
+    const resolvedShopDomain = await this.resolveShopDomain();
+    const config = resolveConfig(resolvedShopDomain);
 
     if (config.shopifyApi) {
       try {
@@ -1519,14 +1581,15 @@ class ShopifyProviderImpl implements ShopifyProvider {
         ])
       ),
       hasShopDomain: Boolean(
-        readEnv([
-          "SHOPIFY_STORE_DOMAIN",
-          "SHOPIFY_SHOP_DOMAIN",
-          "SHOPIFY_SHOP",
-          "SHOPIFY_DOMAIN",
-          "SHOPIFY_MYSHOPIFY_DOMAIN",
-          "SHOPIFY_STORE_ID"
-        ])
+        resolvedShopDomain ||
+          readEnv([
+            "SHOPIFY_STORE_DOMAIN",
+            "SHOPIFY_SHOP_DOMAIN",
+            "SHOPIFY_SHOP",
+            "SHOPIFY_DOMAIN",
+            "SHOPIFY_MYSHOPIFY_DOMAIN",
+            "SHOPIFY_STORE_ID"
+          ])
       ),
       hasAdminAccessToken: Boolean(
         readEnv([

@@ -64,17 +64,25 @@ function safeEqualHex(a: string, b: string): boolean {
 }
 
 function verifyShopifyHmac(url: URL, clientSecret: string): boolean {
-  const provided = url.searchParams.get("hmac") ?? "";
+  const provided = (url.searchParams.get("hmac") ?? "").toLowerCase().trim();
   if (!provided) {
     return false;
   }
 
-  const entries = [...url.searchParams.entries()]
-    .filter(([key]) => key !== "hmac" && key !== "signature")
-    .sort(([a], [b]) => a.localeCompare(b));
+  const rawQuery = url.search.startsWith("?") ? url.search.slice(1) : url.search;
+  const entries = rawQuery
+    .split("&")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .filter((entry) => !entry.startsWith("hmac=") && !entry.startsWith("signature="))
+    .sort((a, b) => a.localeCompare(b));
 
-  const message = entries.map(([key, value]) => `${key}=${value}`).join("&");
-  const digest = crypto.createHmac("sha256", clientSecret).update(message).digest("hex");
+  const message = entries.join("&");
+  const digest = crypto
+    .createHmac("sha256", clientSecret)
+    .update(message)
+    .digest("hex")
+    .toLowerCase();
 
   return safeEqualHex(digest, provided);
 }
