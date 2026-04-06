@@ -403,32 +403,6 @@ function blankData(): ShopifyData {
         ]
       },
       {
-        id: "shopify-acquisition",
-        label: "Acquisition Cohorts",
-        metrics: [
-          {
-            id: "shopify_google_ads_first_order_aov",
-            label: "Customer AOV first order from Google Ads",
-            value: "-"
-          },
-          {
-            id: "shopify_google_ads_ltv",
-            label: "Customer LTV from Google Ads",
-            value: "-"
-          },
-          {
-            id: "shopify_unbranded_seo_first_order_aov",
-            label: "Customer AOV first order from Unbranded SEO",
-            value: "-"
-          },
-          {
-            id: "shopify_unbranded_seo_ltv",
-            label: "Customer LTV from Unbranded SEO",
-            value: "-"
-          }
-        ]
-      },
-      {
         id: "shopify-country-mtd",
         label: "Total Revenue by Country (MTD)",
         metrics: [
@@ -517,32 +491,6 @@ function buildData(periods: PeriodSummary[], metrics: DerivedMetrics, currency: 
         ]
       },
       {
-        id: "shopify-acquisition",
-        label: "Acquisition Cohorts",
-        metrics: [
-          {
-            id: "shopify_google_ads_first_order_aov",
-            label: "Customer AOV first order from Google Ads",
-            value: formatCurrency(metrics.googleAdsFirstOrderAov, currency)
-          },
-          {
-            id: "shopify_google_ads_ltv",
-            label: "Customer LTV from Google Ads",
-            value: formatCurrency(metrics.googleAdsLtv, currency)
-          },
-          {
-            id: "shopify_unbranded_seo_first_order_aov",
-            label: "Customer AOV first order from Unbranded SEO",
-            value: formatCurrency(metrics.unbrandedSeoFirstOrderAov, currency)
-          },
-          {
-            id: "shopify_unbranded_seo_ltv",
-            label: "Customer LTV from Unbranded SEO",
-            value: formatCurrency(metrics.unbrandedSeoLtv, currency)
-          }
-        ]
-      },
-      {
         id: "shopify-country-mtd",
         label: "Total Revenue by Country (MTD)",
         metrics: [
@@ -561,10 +509,7 @@ function buildData(periods: PeriodSummary[], metrics: DerivedMetrics, currency: 
     ],
     charts: {
       trend,
-      split: [
-        { label: "US", value: metrics.usRevenueMtd },
-        { label: "UK", value: metrics.ukRevenueMtd }
-      ]
+      split: []
     },
     tables: [
       {
@@ -580,22 +525,6 @@ function buildData(periods: PeriodSummary[], metrics: DerivedMetrics, currency: 
             aov: formatCurrency(aov, currency)
           };
         })
-      },
-      {
-        key: "shopify-acquisition-performance",
-        title: "Acquisition Performance",
-        rows: [
-          {
-            channel: "Google Ads",
-            firstOrderAov: formatCurrency(metrics.googleAdsFirstOrderAov, currency),
-            customerLtv: formatCurrency(metrics.googleAdsLtv, currency)
-          },
-          {
-            channel: "Unbranded SEO",
-            firstOrderAov: formatCurrency(metrics.unbrandedSeoFirstOrderAov, currency),
-            customerLtv: formatCurrency(metrics.unbrandedSeoLtv, currency)
-          }
-        ]
       }
     ]
   };

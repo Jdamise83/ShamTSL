@@ -13,6 +13,7 @@ interface PerformanceModuleViewProps {
   data: PerformanceModuleData;
   splitTitle?: string;
   valuePrefix?: string;
+  showSplit?: boolean;
 }
 
 export function PerformanceModuleView({
@@ -20,7 +21,8 @@ export function PerformanceModuleView({
   description,
   data,
   splitTitle = "Branded vs Non-Branded",
-  valuePrefix
+  valuePrefix,
+  showSplit = true
 }: PerformanceModuleViewProps) {
   return (
     <div className="space-y-8">
@@ -28,18 +30,20 @@ export function PerformanceModuleView({
 
       <ModuleKpiGroups groups={data.kpiGroups} />
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-6 ${showSplit ? "xl:grid-cols-2" : ""}`}>
         <ChartCard title="Performance Trend" subtitle="Period trend line" >
           <LineTrendChart data={data.charts.trend} valuePrefix={valuePrefix} />
         </ChartCard>
-        <Card className="border-border/80 bg-card">
-          <CardHeader>
-            <CardTitle className="text-base uppercase tracking-[0.08em]">{splitTitle}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SplitBar data={data.charts.split ?? []} />
-          </CardContent>
-        </Card>
+        {showSplit ? (
+          <Card className="border-border/80 bg-card">
+            <CardHeader>
+              <CardTitle className="text-base uppercase tracking-[0.08em]">{splitTitle}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <SplitBar data={data.charts.split ?? []} />
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <section className="space-y-4">

@@ -37,9 +37,9 @@ export default async function ShopifyPage(props: { searchParams?: SearchParams }
 
       <PerformanceModuleView
         title="Shopify"
-        description="MTD revenue/orders, customer lifetime value, channel acquisition quality, and US vs UK revenue."
+        description="Revenue, orders, and customer lifetime value."
         data={data}
-        splitTitle="US vs UK Revenue (MTD)"
+        showSplit={false}
         valuePrefix=""
       />
     </div>
