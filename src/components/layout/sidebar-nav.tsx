@@ -36,14 +36,14 @@ export function SidebarNav({ role: _role }: { role?: "staff" | "admin" }) {
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-72 border-r border-border/80 bg-card px-5 py-8 lg:block">
+    <aside className="sticky top-0 hidden h-screen w-72 border-r border-white/25 bg-[#0396FF] px-5 py-8 text-white lg:block">
       <div className="mb-10 px-2">
         <img
           src="https://cdn.shopify.com/s/files/1/0991/4689/1610/files/new_thesnuslife_logotype.svg?v=1775047239"
           alt="The Snus Life"
           className="h-auto w-full max-w-[232px]"
         />
-        <p className="mt-3 font-heading text-lg italic text-muted-foreground">Operation Takeover</p>
+        <p className="mt-3 font-heading text-lg italic text-white">Operation Takeover</p>
       </div>
 
       <nav className="space-y-1.5">
@@ -61,8 +61,8 @@ export function SidebarNav({ role: _role }: { role?: "staff" | "admin" }) {
               className={cn(
                 "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors",
                 active
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                  ? "bg-white/25 text-white"
+                  : "text-white hover:bg-white/15 hover:text-white"
               )}
             >
               <Icon className="h-4 w-4" />
