@@ -4,6 +4,8 @@ import { NextResponse } from "next/server";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+const DEFAULT_SHOP_DOMAIN = "cwu5dz-dz.myshopify.com";
+
 function readEnv(names: string[]): string {
   for (const name of names) {
     const value = process.env[name]?.trim();
@@ -155,7 +157,7 @@ export async function GET(request: Request) {
       "SHOPIFY_STORE_ID"
     ])
   );
-  const shopDomain = shopFromQuery || shopFromEnv || shopFromCookie || shopFromSupabase;
+  const shopDomain = shopFromQuery || shopFromEnv || shopFromSupabase || shopFromCookie || DEFAULT_SHOP_DOMAIN;
   const clientId = readEnv([
     "SHOPIFY_APP_CLIENT_ID",
     "SHOPIFY_CLIENT_ID",
