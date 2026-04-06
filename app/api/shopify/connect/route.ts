@@ -41,8 +41,12 @@ function normalizeShopDomain(value: string): string {
       return "";
     }
 
-    if (cleanShop.includes(".")) {
+    if (cleanShop.endsWith(".myshopify.com")) {
       return cleanShop;
+    }
+
+    if (cleanShop.includes(".")) {
+      return "";
     }
 
     return `${cleanShop}.myshopify.com`;
@@ -178,8 +182,7 @@ export async function GET(request: Request) {
   }
 
   const state = crypto.randomBytes(20).toString("hex");
-  const scopes =
-    readEnv(["SHOPIFY_SCOPES"]) || "read_orders,read_customers,read_analytics";
+  const scopes = readEnv(["SHOPIFY_SCOPES"]) || "read_orders,read_customers";
 
   const redirectUri = new URL("/api/shopify/callback", requestOrigin).toString();
 

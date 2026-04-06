@@ -27,8 +27,12 @@ function normalizeShopDomain(value: string): string {
       return "";
     }
 
-    if (cleanShop.includes(".")) {
+    if (cleanShop.endsWith(".myshopify.com")) {
       return cleanShop;
+    }
+
+    if (cleanShop.includes(".")) {
+      return "";
     }
 
     return `${cleanShop}.myshopify.com`;

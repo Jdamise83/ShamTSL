@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { shopifyService } from "@/server/services";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
-const DEFAULT_SHOP_DOMAIN = "cwu5dz-dz.myshopify.com";
+const PRIMARY_SHOP_DOMAIN = "cwu5dz-dz.myshopify.com";
+const ALTERNATE_SHOP_DOMAIN = "tsl-8033.myshopify.com";
+
+export const dynamic = "force-dynamic";
 
 function getParam(
   source: Record<string, string | string[] | undefined>,
@@ -48,14 +51,19 @@ export default async function ShopifyPage(props: { searchParams?: SearchParams }
   const errorMessage = getParam(params, "shopify_error");
   const data = await shopifyService.getDashboardData();
   const envShopDomain = normalizeShopDomain(process.env.SHOPIFY_STORE_DOMAIN ?? "");
-  const connectShop = envShopDomain || DEFAULT_SHOP_DOMAIN;
+  const connectShop = envShopDomain || PRIMARY_SHOP_DOMAIN;
   const connectHref = `/api/shopify/connect?shop=${encodeURIComponent(connectShop)}`;
+  const alternateShop = connectShop === PRIMARY_SHOP_DOMAIN ? ALTERNATE_SHOP_DOMAIN : PRIMARY_SHOP_DOMAIN;
+  const alternateConnectHref = `/api/shopify/connect?shop=${encodeURIComponent(alternateShop)}`;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <Button asChild size="sm">
           <Link href={connectHref}>Connect Shopify</Link>
+        </Button>
+        <Button asChild size="sm" variant="outline">
+          <Link href={alternateConnectHref}>Try Alternate Shop Domain</Link>
         </Button>
         {connected ? (
           <p className="text-sm text-emerald-700">Shopify connected. Live sync enabled.</p>
