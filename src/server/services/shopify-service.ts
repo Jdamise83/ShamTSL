@@ -1043,6 +1043,61 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
     }
   `;
 
+  const customerCountryQuery = `
+    query DashboardOrdersCustomerCountry($first: Int!, $after: String, $query: String!) {
+      orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        edges {
+          node {
+            createdAt
+            currentTotalPriceSet { shopMoney { amount } }
+            totalPriceSet { shopMoney { amount } }
+            shippingAddress { countryCodeV2 }
+            billingAddress { countryCodeV2 }
+            customer {
+              id
+            }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `;
+
+  const customerOnlyQuery = `
+    query DashboardOrdersCustomerOnly($first: Int!, $after: String, $query: String!) {
+      orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        edges {
+          node {
+            createdAt
+            currentTotalPriceSet { shopMoney { amount } }
+            totalPriceSet { shopMoney { amount } }
+            customer {
+              id
+            }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `;
+
+  const countryOnlyQuery = `
+    query DashboardOrdersCountryOnly($first: Int!, $after: String, $query: String!) {
+      orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        edges {
+          node {
+            createdAt
+            currentTotalPriceSet { shopMoney { amount } }
+            totalPriceSet { shopMoney { amount } }
+            shippingAddress { countryCodeV2 }
+            billingAddress { countryCodeV2 }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `;
+
   const attempts: Array<{
     label: string;
     query: string;
@@ -1075,6 +1130,36 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
         customerId: false,
         customerLifetime: false,
         attribution: true,
+        country: true
+      }
+    },
+    {
+      label: "customer-country query",
+      query: customerCountryQuery,
+      features: {
+        customerId: true,
+        customerLifetime: false,
+        attribution: false,
+        country: true
+      }
+    },
+    {
+      label: "customer-only query",
+      query: customerOnlyQuery,
+      features: {
+        customerId: true,
+        customerLifetime: false,
+        attribution: false,
+        country: false
+      }
+    },
+    {
+      label: "country-only query",
+      query: countryOnlyQuery,
+      features: {
+        customerId: false,
+        customerLifetime: false,
+        attribution: false,
         country: true
       }
     },
@@ -1660,6 +1745,18 @@ class ShopifyProviderImpl implements ShopifyProvider {
       try {
         const token = await this.getAccessToken(config.shopifyApi);
         const orders = await fetchOrders(config.shopifyApi, token);
+        console.info("[Shopify] Orders payload completeness", {
+          total: orders.length,
+          withCustomerId: orders.filter((order) => Boolean(order.customerId)).length,
+          withCountry: orders.filter((order) => Boolean(order.countryCode)).length,
+          withAttribution: orders.filter(
+            (order) => Boolean(order.landingPageUrl) || Boolean(order.referringSite)
+          ).length,
+          withLifetimeFields: orders.filter(
+            (order) =>
+              order.customerLifetimeValue !== null || order.customerLifetimeOrders !== null
+          ).length
+        });
         const periods = aggregatePeriods(orders);
         let ga4Signals: Ga4AttributionSignals | null = null;
 
