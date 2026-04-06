@@ -137,6 +137,7 @@ const BRAND_TERMS = ["snus life", "snuslife", "the snus life", "thesnuslife"];
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_API_VERSION = "2025-01";
 const DATA_CACHE_TTL_MS = 2 * 60_000;
+const DEFAULT_SHOP_DOMAIN = "cwu5dz-dz.myshopify.com";
 
 function readEnv(names: string[]): string {
   for (const name of names) {
@@ -636,7 +637,8 @@ function resolveConfig(shopDomainOverride?: string): RuntimeConfig {
   const apiVersion = readEnv(["SHOPIFY_API_VERSION"]) || DEFAULT_API_VERSION;
   const currency = (readEnv(["SHOPIFY_CURRENCY"]) || "GBP").toUpperCase();
   const timeoutRaw = readEnv(["SHOPIFY_APP_TIMEOUT_MS", "SHOPIFY_TIMEOUT_MS"]);
-  const allowTokenExchange = isTruthyFlag(readEnv(["SHOPIFY_ENABLE_TOKEN_EXCHANGE"]));
+  const allowTokenExchangeRaw = readEnv(["SHOPIFY_ENABLE_TOKEN_EXCHANGE"]);
+  const allowTokenExchange = allowTokenExchangeRaw ? isTruthyFlag(allowTokenExchangeRaw) : true;
   const timeout = Number(timeoutRaw);
   const timeoutMs = Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TIMEOUT_MS;
 
@@ -1419,6 +1421,16 @@ class ShopifyProviderImpl implements ShopifyProvider {
   private inFlight: Promise<ShopifyData> | null = null;
 
   private async resolveShopDomain(): Promise<string> {
+    const fromCookie = await readShopifyStoreDomainFromCookie();
+    if (fromCookie) {
+      return fromCookie;
+    }
+
+    const fromSupabase = await readShopifyStoreDomainFromSupabase();
+    if (fromSupabase) {
+      return fromSupabase;
+    }
+
     const fromEnv = normalizeShopDomain(
       readEnv([
         "SHOPIFY_STORE_DOMAIN",
@@ -1434,12 +1446,7 @@ class ShopifyProviderImpl implements ShopifyProvider {
       return fromEnv;
     }
 
-    const fromCookie = await readShopifyStoreDomainFromCookie();
-    if (fromCookie) {
-      return fromCookie;
-    }
-
-    return readShopifyStoreDomainFromSupabase();
+    return DEFAULT_SHOP_DOMAIN;
   }
 
   async getDashboardData(): Promise<ShopifyData> {

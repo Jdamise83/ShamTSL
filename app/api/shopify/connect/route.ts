@@ -151,17 +151,7 @@ export async function GET(request: Request) {
     readCookie(request, "shopify_store_domain") || readCookie(request, "shopify_oauth_shop")
   );
   const shopFromSupabase = normalizeShopDomain(await readShopDomainFromSupabase());
-  const shopFromEnv = normalizeShopDomain(
-    readEnv([
-      "SHOPIFY_STORE_DOMAIN",
-      "SHOPIFY_SHOP_DOMAIN",
-      "SHOPIFY_SHOP",
-      "SHOPIFY_DOMAIN",
-      "SHOPIFY_MYSHOPIFY_DOMAIN",
-      "SHOPIFY_STORE_ID"
-    ])
-  );
-  const shopDomain = shopFromQuery || shopFromEnv || shopFromSupabase || shopFromCookie || DEFAULT_SHOP_DOMAIN;
+  const shopDomain = shopFromQuery || shopFromSupabase || shopFromCookie || DEFAULT_SHOP_DOMAIN;
   const clientId = readEnv([
     "SHOPIFY_APP_CLIENT_ID",
     "SHOPIFY_CLIENT_ID",
