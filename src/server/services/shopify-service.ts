@@ -74,6 +74,13 @@ interface ShopifyOrder {
   countryCode: string;
 }
 
+interface OrderQueryFeatures {
+  customerId: boolean;
+  customerLifetime: boolean;
+  attribution: boolean;
+  country: boolean;
+}
+
 interface GraphqlOrderEdge {
   node?: {
     createdAt?: string;
@@ -860,7 +867,7 @@ async function fetchOrdersWithQuery(
   config: ShopifyApiConfig,
   accessToken: string,
   query: string,
-  lightweight = false
+  features: OrderQueryFeatures
 ): Promise<ShopifyOrder[]> {
   const endpoint = `https://${config.shopDomain}/admin/api/${config.apiVersion}/graphql.json`;
   const { fetchStart } = getBoundaries();
@@ -927,22 +934,24 @@ async function fetchOrdersWithQuery(
       orders.push({
         createdAt,
         revenue,
-        customerId: lightweight ? null : (node?.customer?.id ?? null),
+        customerId: features.customerId ? (node?.customer?.id ?? null) : null,
         customerLifetimeValue:
-          lightweight || node?.customer?.amountSpent?.amount === undefined
+          !features.customerLifetime || node?.customer?.amountSpent?.amount === undefined
             ? null
             : toNumber(node?.customer?.amountSpent?.amount),
         customerLifetimeOrders:
-          lightweight || node?.customer?.numberOfOrders === undefined || node?.customer?.numberOfOrders === null
+          !features.customerLifetime ||
+          node?.customer?.numberOfOrders === undefined ||
+          node?.customer?.numberOfOrders === null
             ? null
             : toNumber(node?.customer?.numberOfOrders),
-        landingPageUrl: lightweight ? "" : (node?.landingPageUrl ?? ""),
-        referringSite: lightweight ? "" : (node?.referringSite ?? ""),
-        countryCode: lightweight
-          ? ""
-          : String(node?.shippingAddress?.countryCodeV2 ?? node?.billingAddress?.countryCodeV2 ?? "")
+        landingPageUrl: features.attribution ? (node?.landingPageUrl ?? "") : "",
+        referringSite: features.attribution ? (node?.referringSite ?? "") : "",
+        countryCode: features.country
+          ? String(node?.shippingAddress?.countryCodeV2 ?? node?.billingAddress?.countryCodeV2 ?? "")
               .toUpperCase()
               .trim()
+          : ""
       });
     }
 
@@ -993,14 +1002,107 @@ async function fetchOrders(config: ShopifyApiConfig, accessToken: string): Promi
     }
   `;
 
-  try {
-    return await fetchOrdersWithQuery(config, accessToken, richQuery, false);
-  } catch (error) {
-    console.warn("[Shopify] Rich order query failed. Falling back to lightweight query.", {
-      error: error instanceof Error ? error.message : String(error)
-    });
-    return fetchOrdersWithQuery(config, accessToken, lightweightQuery, true);
+  const noLifetimeQuery = `
+    query DashboardOrdersNoLifetime($first: Int!, $after: String, $query: String!) {
+      orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        edges {
+          node {
+            createdAt
+            currentTotalPriceSet { shopMoney { amount } }
+            totalPriceSet { shopMoney { amount } }
+            landingPageUrl
+            referringSite
+            shippingAddress { countryCodeV2 }
+            billingAddress { countryCodeV2 }
+            customer {
+              id
+            }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `;
+
+  const noCustomerQuery = `
+    query DashboardOrdersNoCustomer($first: Int!, $after: String, $query: String!) {
+      orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+        edges {
+          node {
+            createdAt
+            currentTotalPriceSet { shopMoney { amount } }
+            totalPriceSet { shopMoney { amount } }
+            landingPageUrl
+            referringSite
+            shippingAddress { countryCodeV2 }
+            billingAddress { countryCodeV2 }
+          }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  `;
+
+  const attempts: Array<{
+    label: string;
+    query: string;
+    features: OrderQueryFeatures;
+  }> = [
+    {
+      label: "rich query",
+      query: richQuery,
+      features: {
+        customerId: true,
+        customerLifetime: true,
+        attribution: true,
+        country: true
+      }
+    },
+    {
+      label: "no-lifetime query",
+      query: noLifetimeQuery,
+      features: {
+        customerId: true,
+        customerLifetime: false,
+        attribution: true,
+        country: true
+      }
+    },
+    {
+      label: "no-customer query",
+      query: noCustomerQuery,
+      features: {
+        customerId: false,
+        customerLifetime: false,
+        attribution: true,
+        country: true
+      }
+    },
+    {
+      label: "lightweight query",
+      query: lightweightQuery,
+      features: {
+        customerId: false,
+        customerLifetime: false,
+        attribution: false,
+        country: false
+      }
+    }
+  ];
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      return await fetchOrdersWithQuery(config, accessToken, attempt.query, attempt.features);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[Shopify] ${attempt.label} failed. Trying next fallback.`, {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
   }
+
+  throw (lastError ?? new Error("Unable to fetch Shopify orders with available query fallbacks."));
 }
 
 function aggregatePeriods(orders: ShopifyOrder[]): PeriodSummary[] {
@@ -1245,7 +1347,7 @@ function detectAcquisition(
         : null;
 
   if (!heuristicChannel) {
-    return null;
+    return ga4Signals ? pickDominantChannel(ga4Signals.totals) : null;
   }
 
   if (!ga4Signals) {
@@ -1266,6 +1368,18 @@ function average(sum: number, count: number) {
 
 function deriveMetrics(orders: ShopifyOrder[], ga4Signals: Ga4AttributionSignals | null): DerivedMetrics {
   const { monthStart } = getBoundaries();
+
+  const observedCustomerTotals = new Map<string, { revenue: number; orders: number }>();
+  for (const order of orders) {
+    if (!order.customerId) {
+      continue;
+    }
+
+    const current = observedCustomerTotals.get(order.customerId) ?? { revenue: 0, orders: 0 };
+    current.revenue += order.revenue;
+    current.orders += 1;
+    observedCustomerTotals.set(order.customerId, current);
+  }
 
   const mtdOrders = orders.filter((order) => {
     const date = new Date(order.createdAt);
@@ -1290,13 +1404,17 @@ function deriveMetrics(orders: ShopifyOrder[], ga4Signals: Ga4AttributionSignals
       continue;
     }
 
-    if (order.customerLifetimeValue === null || order.customerLifetimeOrders === null) {
+    const observed = observedCustomerTotals.get(order.customerId);
+    const lifetimeValue = order.customerLifetimeValue ?? observed?.revenue ?? 0;
+    const lifetimeOrders = order.customerLifetimeOrders ?? observed?.orders ?? 0;
+
+    if (lifetimeValue <= 0 && lifetimeOrders <= 0) {
       continue;
     }
 
     mtdCustomerStats.set(order.customerId, {
-      ltv: order.customerLifetimeValue,
-      lifetimeOrders: order.customerLifetimeOrders
+      ltv: lifetimeValue,
+      lifetimeOrders
     });
   }
 
@@ -1362,8 +1480,11 @@ function deriveMetrics(orders: ShopifyOrder[], ga4Signals: Ga4AttributionSignals
     all.firstOrderRevenueSum += firstOrder.revenue;
     all.firstOrderCount += 1;
 
-    if (firstOrder.customerLifetimeValue !== null) {
-      all.ltvSum += firstOrder.customerLifetimeValue;
+    const observed = firstOrder.customerId ? observedCustomerTotals.get(firstOrder.customerId) : undefined;
+    const effectiveLtv = firstOrder.customerLifetimeValue ?? observed?.revenue ?? 0;
+
+    if (effectiveLtv > 0) {
+      all.ltvSum += effectiveLtv;
       all.ltvCount += 1;
     }
 
@@ -1379,8 +1500,8 @@ function deriveMetrics(orders: ShopifyOrder[], ga4Signals: Ga4AttributionSignals
     reliable.firstOrderRevenueSum += firstOrder.revenue;
     reliable.firstOrderCount += 1;
 
-    if (firstOrder.customerLifetimeValue !== null) {
-      reliable.ltvSum += firstOrder.customerLifetimeValue;
+    if (effectiveLtv > 0) {
+      reliable.ltvSum += effectiveLtv;
       reliable.ltvCount += 1;
     }
   }
