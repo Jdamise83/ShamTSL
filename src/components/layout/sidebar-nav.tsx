@@ -7,7 +7,6 @@ import {
   ChartColumn,
   Cog,
   Factory,
-  Home,
   LayoutGrid,
   Megaphone,
   ShoppingBag,
@@ -19,16 +18,15 @@ import {
 import { cn } from "@/lib/utils";
 
 const navigation = [
-  { href: "/home", label: "Home", icon: Home },
   { href: "/calendar", label: "Main Calendar", icon: Calendar },
   { href: "/calendar/personal", label: "Personal Calendar", icon: Users },
-  { href: "/calendar/brand-campaign", label: "Brand & Campaign Calendar", icon: LayoutGrid },
-  { href: "/holidays", label: "Holidays", icon: Umbrella },
-  { href: "/google-ads", label: "Google Ads", icon: Megaphone },
-  { href: "/seo", label: "SEO", icon: Search },
-  { href: "/ga4", label: "GA4", icon: ChartColumn },
-  { href: "/unleashed", label: "Unleashed", icon: Factory },
+  { href: "/calendar/brand-campaign", label: "Brand Calendar", icon: LayoutGrid },
   { href: "/shopify", label: "Shopify", icon: ShoppingBag },
+  { href: "/unleashed", label: "Unleashed", icon: Factory },
+  { href: "/google-ads", label: "Google Ads", icon: Megaphone },
+  { href: "/ga4", label: "GA4", icon: ChartColumn },
+  { href: "/seo", label: "SEO", icon: Search },
+  { href: "/holidays", label: "Holidays", icon: Umbrella },
   { href: "/settings", label: "Settings", icon: Cog }
 ];
 

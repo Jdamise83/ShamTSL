@@ -6,16 +6,15 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const links = [
-  { href: "/home", label: "Home" },
   { href: "/calendar", label: "Main Cal" },
   { href: "/calendar/personal", label: "Personal Cal" },
-  { href: "/calendar/brand-campaign", label: "Brand/Camp" },
-  { href: "/holidays", label: "Holidays" },
-  { href: "/google-ads", label: "Ads" },
-  { href: "/seo", label: "SEO" },
-  { href: "/ga4", label: "GA4" },
-  { href: "/unleashed", label: "Unleashed" },
+  { href: "/calendar/brand-campaign", label: "Brand Cal" },
   { href: "/shopify", label: "Shopify" },
+  { href: "/unleashed", label: "Unleashed" },
+  { href: "/google-ads", label: "Ads" },
+  { href: "/ga4", label: "GA4" },
+  { href: "/seo", label: "SEO" },
+  { href: "/holidays", label: "Holidays" },
   { href: "/settings", label: "Settings" }
 ];
 
