@@ -157,6 +157,10 @@ function getStatusLabel(status: MeetingStatus) {
   return statusLabelMap[status] ?? status;
 }
 
+function isReadOnlyProvisionalEntry(event?: CalendarEvent) {
+  return event?.createdBy === "system-tradeshow";
+}
+
 function getDynamicEventTitleFontSize(title: string) {
   const length = title.trim().length;
 
@@ -552,6 +556,11 @@ export function CalendarDashboardClient({
       return;
     }
 
+    if (isReadOnlyProvisionalEntry(eventData)) {
+      setError("Imported provisional trade-show entries are read-only.");
+      return;
+    }
+
     setFormMode("edit");
     setFormState(mapEventToForm(eventData));
     setFormOpen(true);
@@ -571,6 +580,12 @@ export function CalendarDashboardClient({
     eventData: CalendarEvent | undefined;
   }) {
     if (!id || !start || !eventData) {
+      return;
+    }
+
+    if (isReadOnlyProvisionalEntry(eventData)) {
+      revert();
+      setError("Imported provisional trade-show entries are read-only.");
       return;
     }
 

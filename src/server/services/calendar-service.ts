@@ -3,7 +3,7 @@ import "server-only";
 import { formatISO, isAfter, isBefore, parseISO } from "date-fns";
 
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { seededCalendarEvents } from "@/server/data/calendar";
+import { provisionalTradeShowEvents, seededCalendarEvents } from "@/server/data/calendar";
 import type {
   BrandCampaignType,
   CalendarScope,
@@ -194,6 +194,25 @@ function filterByStatuses(events: CalendarEvent[], filters?: CalendarFilters) {
   return events.filter((event) => filters.statuses.includes(event.status));
 }
 
+function eventFingerprint(event: CalendarEvent) {
+  return `${event.title.toLowerCase()}|${event.startsAt}|${event.endsAt}`;
+}
+
+function mergeWithProvisionalTradeShows(events: CalendarEvent[]) {
+  const existing = new Set(events.map(eventFingerprint));
+  const merged = [...events];
+
+  for (const tradeShow of provisionalTradeShowEvents) {
+    const fingerprint = eventFingerprint(tradeShow);
+    if (!existing.has(fingerprint)) {
+      merged.push(tradeShow);
+      existing.add(fingerprint);
+    }
+  }
+
+  return merged;
+}
+
 async function fetchSupabaseEvents(start?: string, end?: string, filters?: CalendarFilters) {
   const admin = createSupabaseAdminClient();
   if (!admin) {
@@ -231,10 +250,15 @@ export const calendarService = {
   async listEvents({ start, end, filters }: { start?: string; end?: string; filters?: CalendarFilters } = {}) {
     const supabaseEvents = await fetchSupabaseEvents(start, end, filters);
     if (supabaseEvents) {
-      return supabaseEvents;
+      const merged = mergeWithProvisionalTradeShows(supabaseEvents);
+      const filteredByDate = filterByDateRange(merged, start, end);
+      return filterByStatuses(filteredByDate, filters).sort(
+        (a, b) => parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime()
+      );
     }
 
-    const filteredByDate = filterByDateRange(inMemoryCalendarEvents, start, end);
+    const merged = mergeWithProvisionalTradeShows(inMemoryCalendarEvents);
+    const filteredByDate = filterByDateRange(merged, start, end);
     return filterByStatuses(filteredByDate, filters).sort((a, b) =>
       parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime()
     );
@@ -250,16 +274,24 @@ export const calendarService = {
           "id,title,description,location,meeting_link,internal_notes,status,starts_at,ends_at,created_by,created_at,updated_at,calendar_event_attendees(id,event_id,email,display_name,created_at)"
         )
         .eq("id", eventId)
-        .single();
+        .maybeSingle();
 
       if (error) {
         throw new Error(`Failed to fetch event: ${error.message}`);
       }
 
-      return mapEventRow(data);
+      if (data) {
+        return mapEventRow(data);
+      }
+
+      return provisionalTradeShowEvents.find((event) => event.id === eventId) ?? null;
     }
 
-    return inMemoryCalendarEvents.find((event) => event.id === eventId) ?? null;
+    return (
+      inMemoryCalendarEvents.find((event) => event.id === eventId) ??
+      provisionalTradeShowEvents.find((event) => event.id === eventId) ??
+      null
+    );
   },
 
   async getUpcomingByType(eventType: CalendarItemType, limit = 3) {
