@@ -111,3 +111,8 @@ body {
 .fc-theme-standard .fc-scrollgrid {
   border-color: hsl(var(--border));
 }
+
+.fc .fc-bg-event.tsl-all-day-bg {
+  opacity: 1;
+  border: none;
+}

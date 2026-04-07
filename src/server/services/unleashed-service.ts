@@ -32,6 +32,14 @@ type UnleashedInvoice = {
   Guid?: string;
   InvoiceDate?: string;
   SubTotal?: number;
+  SalesPersonName?: string;
+  SalespersonName?: string;
+  SalesPerson?: {
+    Name?: string;
+  };
+  Salesperson?: {
+    Name?: string;
+  };
   InvoiceLines?: UnleashedInvoiceLine[];
 };
 
@@ -50,6 +58,12 @@ type PeriodRange = {
 type PeriodTotals = {
   id: PeriodRange["id"];
   label: PeriodRange["label"];
+  revenue: number;
+  totalProfit: number;
+};
+
+type SalesPersonTotals = {
+  salesPerson: string;
   revenue: number;
   totalProfit: number;
 };
@@ -404,32 +418,87 @@ class RealUnleashedProvider implements UnleashedProvider {
     return { revenue, totalProfit };
   }
 
-  private buildData(periods: PeriodTotals[]): UnleashedData {
+  private getSalesPersonName(invoice: UnleashedInvoice) {
+    const candidates = [
+      invoice.SalesPersonName,
+      invoice.SalespersonName,
+      invoice.SalesPerson?.Name,
+      invoice.Salesperson?.Name
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+
+    return "Unassigned";
+  }
+
+  private calculateSalesBySalesPerson(
+    invoices: UnleashedInvoice[],
+    costByProductGuid: Map<string, number>
+  ): SalesPersonTotals[] {
+    const totalsBySalesPerson = new Map<string, { revenue: number; totalProfit: number }>();
+
+    for (const invoice of invoices) {
+      const salesPerson = this.getSalesPersonName(invoice);
+      const current = totalsBySalesPerson.get(salesPerson) ?? { revenue: 0, totalProfit: 0 };
+      const invoiceRevenue = this.getInvoiceRevenue(invoice);
+
+      let invoiceProfit = 0;
+      for (const line of invoice.InvoiceLines ?? []) {
+        const lineTotal = this.toNumber(line.LineTotal);
+        const quantity = this.toNumber(line.InvoiceQuantity);
+        const productGuid = line.Product?.Guid ?? "";
+        const unitCost = costByProductGuid.get(productGuid) ?? 0;
+        invoiceProfit += lineTotal - unitCost * quantity;
+      }
+
+      current.revenue += invoiceRevenue;
+      current.totalProfit += invoiceProfit;
+      totalsBySalesPerson.set(salesPerson, current);
+    }
+
+    return [...totalsBySalesPerson.entries()]
+      .map(([salesPerson, totals]) => ({
+        salesPerson,
+        revenue: totals.revenue,
+        totalProfit: totals.totalProfit
+      }))
+      .sort((a, b) => b.revenue - a.revenue);
+  }
+
+  private buildData(periods: PeriodTotals[], salesBySalesPerson: SalesPersonTotals[]): UnleashedData {
     const periodById = new Map(periods.map((period) => [period.id, period]));
     const month = periodById.get("month");
     const monthRevenue = month?.revenue ?? 0;
     const monthProfit = month?.totalProfit ?? 0;
     const profitShare = monthRevenue > 0 ? Math.round((monthProfit / monthRevenue) * 100) : 0;
 
+    const snapshotMetrics = periods.flatMap((period) => [
+      {
+        id: `revenue_${period.id}`,
+        label: `${period.label} Revenue`,
+        value: this.formatCurrency(period.revenue),
+        change: undefined
+      },
+      {
+        id: `profit_${period.id}`,
+        label: `${period.label} Total Profit`,
+        value: this.formatCurrency(period.totalProfit),
+        change: undefined
+      }
+    ]);
+
     return {
-      kpiGroups: periods.map((period) => ({
-        id: period.id,
-        label: period.label,
-        metrics: [
-          {
-            id: `revenue_${period.id}`,
-            label: "Revenue",
-            value: this.formatCurrency(period.revenue),
-            change: undefined
-          },
-          {
-            id: `profit_${period.id}`,
-            label: "Total Profit",
-            value: this.formatCurrency(period.totalProfit),
-            change: undefined
-          }
-        ]
-      })),
+      kpiGroups: [
+        {
+          id: "snapshot-overview",
+          label: "Snapshot Overview",
+          metrics: snapshotMetrics
+        }
+      ],
       charts: {
         trend: periods.map((period) => ({
           label:
@@ -461,6 +530,28 @@ class RealUnleashedProvider implements UnleashedProvider {
               "Profit Margin": `${margin.toFixed(2)}%`
             };
           })
+        },
+        {
+          key: "sales-by-sales-person",
+          title: "Sales by Sales Person",
+          rows: salesBySalesPerson.length
+            ? salesBySalesPerson.map((row) => {
+                const margin = row.revenue > 0 ? (row.totalProfit / row.revenue) * 100 : 0;
+                return {
+                  "Sales Person": row.salesPerson,
+                  Revenue: this.formatCurrency(row.revenue),
+                  "Total Profit": this.formatCurrency(row.totalProfit),
+                  "Profit Margin": `${margin.toFixed(2)}%`
+                };
+              })
+            : [
+                {
+                  "Sales Person": "No data",
+                  Revenue: "-",
+                  "Total Profit": "-",
+                  "Profit Margin": "-"
+                }
+              ]
         }
       ]
     };
@@ -475,14 +566,26 @@ class RealUnleashedProvider implements UnleashedProvider {
     ] as const;
 
     return {
-      kpiGroups: periods.map((period) => ({
-        id: period.id,
-        label: period.label,
-        metrics: [
-          { id: `revenue_${period.id}`, label: "Revenue", value: "-", change: undefined },
-          { id: `profit_${period.id}`, label: "Total Profit", value: "-", change: undefined }
-        ]
-      })),
+      kpiGroups: [
+        {
+          id: "snapshot-overview",
+          label: "Snapshot Overview",
+          metrics: periods.flatMap((period) => [
+            {
+              id: `revenue_${period.id}`,
+              label: `${period.label} Revenue`,
+              value: "-",
+              change: undefined
+            },
+            {
+              id: `profit_${period.id}`,
+              label: `${period.label} Total Profit`,
+              value: "-",
+              change: undefined
+            }
+          ])
+        }
+      ],
       charts: {
         trend: [
           { label: "Day", value: 0 },
@@ -505,6 +608,18 @@ class RealUnleashedProvider implements UnleashedProvider {
             "Total Profit": "-",
             "Profit Margin": "-"
           }))
+        },
+        {
+          key: "sales-by-sales-person",
+          title: "Sales by Sales Person",
+          rows: [
+            {
+              "Sales Person": "No data",
+              Revenue: "-",
+              "Total Profit": "-",
+              "Profit Margin": "-"
+            }
+          ]
         }
       ]
     };
@@ -548,7 +663,18 @@ class RealUnleashedProvider implements UnleashedProvider {
         } satisfies PeriodTotals;
       });
 
-      const data = this.buildData(totals);
+      const monthRange = ranges.find((range) => range.id === "month");
+      const monthInvoices = allInvoices.filter((invoice) => {
+        const invoiceDate = this.parseUnleashedDate(invoice.InvoiceDate);
+        if (!invoiceDate || !monthRange) {
+          return false;
+        }
+
+        return invoiceDate >= monthRange.startDate && invoiceDate <= monthRange.endDate;
+      });
+      const salesBySalesPerson = this.calculateSalesBySalesPerson(monthInvoices, productCosts);
+
+      const data = this.buildData(totals, salesBySalesPerson);
       unleashedCachedData = {
         data,
         expiresAt: Date.now() + UNLEASHED_CACHE_TTL_MS

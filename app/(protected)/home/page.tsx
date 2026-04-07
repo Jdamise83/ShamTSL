@@ -10,18 +10,39 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { homeService } from "@/server/services";
 import type { CalendarEvent } from "@/types/calendar";
 
+const dateFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric"
+});
+
+const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
+
+const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
+
 function formatCalendarItemRange(item: CalendarEvent) {
   const startDate = new Date(item.startsAt);
   const endDate = new Date(item.endsAt);
 
   if (item.allDay) {
     const endDisplay = new Date(endDate.getTime() - 24 * 60 * 60 * 1000);
-    const startLabel = startDate.toLocaleDateString();
-    const endLabel = endDisplay.toLocaleDateString();
+    const startLabel = dateFormatter.format(startDate);
+    const endLabel = dateFormatter.format(endDisplay);
     return startLabel === endLabel ? startLabel : `${startLabel} - ${endLabel}`;
   }
 
-  return `${startDate.toLocaleString()} - ${endDate.toLocaleTimeString()}`;
+  return `${dateTimeFormatter.format(startDate)} - ${timeFormatter.format(endDate)}`;
 }
 
 export default async function HomePage() {

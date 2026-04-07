@@ -41,6 +41,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
     eventType: "meeting" as CalendarItemType,
     allDay: false,
     notes: null as string | null,
+    imageUrl: null as string | null,
     calendarScope: "main" as CalendarScope,
     personalOwner: null as PersonalCalendarOwner | null,
     brandCampaignType: null as BrandCampaignType | null,
@@ -62,6 +63,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
     const parsed = JSON.parse(metadataRaw) as {
       eventType?: CalendarItemType;
       allDay?: boolean;
+      imageUrl?: string | null;
       calendarScope?: CalendarScope;
       personalOwner?: PersonalCalendarOwner | null;
       brandCampaignType?: BrandCampaignType | null;
@@ -77,12 +79,14 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
         ? "personal"
         : "main";
     const calendarScope = isCalendarScope(parsed.calendarScope) ? parsed.calendarScope : inferredScope;
+    const imageUrl = typeof parsed.imageUrl === "string" && parsed.imageUrl.trim() ? parsed.imageUrl.trim() : null;
     const notes = notesLines.join("\n").trim() || null;
 
     return {
       eventType,
       allDay: parsed.allDay === true,
       notes,
+      imageUrl,
       calendarScope,
       personalOwner,
       brandCampaignType,
@@ -97,6 +101,7 @@ function buildInternalNotesPayload(
   rawNotes: string | undefined,
   eventType: CalendarItemType,
   allDay: boolean,
+  imageUrl: string | null,
   calendarScope: CalendarScope,
   personalOwner: PersonalCalendarOwner | null,
   brandCampaignType: BrandCampaignType | null,
@@ -106,6 +111,7 @@ function buildInternalNotesPayload(
   const requiresMetadata =
     eventType !== "meeting" ||
     allDay ||
+    imageUrl !== null ||
     calendarScope !== "main" ||
     personalOwner !== null ||
     brandCampaignType !== null ||
@@ -118,6 +124,7 @@ function buildInternalNotesPayload(
   const metadata = `${metadataPrefix}${JSON.stringify({
     eventType,
     allDay,
+    imageUrl,
     calendarScope,
     personalOwner,
     brandCampaignType,
@@ -133,6 +140,7 @@ function mapEventRow(row: any): CalendarEvent {
     id: row.id,
     title: row.title,
     description: row.description,
+    imageUrl: normalized.imageUrl,
     location: row.location,
     meetingLink: row.meeting_link,
     internalNotes: normalized.notes,
@@ -287,6 +295,7 @@ export const calendarService = {
       input.internalNotes,
       eventType,
       allDay,
+      input.imageUrl?.trim() ? input.imageUrl.trim() : null,
       calendarScope,
       personalOwner,
       brandCampaignType,
@@ -345,6 +354,7 @@ export const calendarService = {
       id,
       title: input.title,
       description: input.description ?? null,
+      imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
       location: input.location ?? null,
       meetingLink: input.meetingLink ?? null,
       internalNotes: input.internalNotes ?? null,
@@ -388,6 +398,7 @@ export const calendarService = {
       input.internalNotes,
       eventType,
       allDay,
+      input.imageUrl?.trim() ? input.imageUrl.trim() : null,
       calendarScope,
       personalOwner,
       brandCampaignType,
@@ -453,6 +464,7 @@ export const calendarService = {
             ...event,
             title: input.title,
             description: input.description ?? null,
+            imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
             location: input.location ?? null,
             meetingLink: input.meetingLink ?? null,
             internalNotes: input.internalNotes ?? null,
@@ -494,6 +506,7 @@ export const calendarService = {
     return this.updateEvent(eventId, {
       title: event.title,
       description: event.description ?? undefined,
+      imageUrl: event.imageUrl ?? undefined,
       location: event.location ?? undefined,
       meetingLink: event.meetingLink ?? undefined,
       internalNotes: event.internalNotes ?? undefined,

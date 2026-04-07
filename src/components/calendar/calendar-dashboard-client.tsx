@@ -11,6 +11,7 @@ import type {
   EventDropArg,
   EventInput
 } from "@fullcalendar/core";
+import enGbLocale from "@fullcalendar/core/locales/en-gb";
 import type { DateClickArg, EventResizeDoneArg } from "@fullcalendar/interaction";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
@@ -55,6 +56,7 @@ interface EventFormState {
   id: string | null;
   title: string;
   description: string;
+  imageUrl: string;
   location: string;
   meetingLink: string;
   internalNotes: string;
@@ -74,6 +76,12 @@ interface EventFormState {
 
 const statusOptions: MeetingStatus[] = ["planned", "confirmed", "done", "cancelled"];
 const eventTypeOptions: CalendarItemType[] = ["meeting", "event", "task"];
+const statusLabelMap: Record<MeetingStatus, string> = {
+  planned: "Provisional",
+  confirmed: "Confirmed",
+  done: "Done",
+  cancelled: "Cancelled"
+};
 
 const statusColorMap: Record<MeetingStatus, string> = {
   planned: "#2f74ff",
@@ -110,6 +118,44 @@ const brandColor = "#bfdbfe";
 const campaignColor = "#bbf7d0";
 const taskColor = "#facc15";
 const defaultEventColor = "#fca5a5";
+
+const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
+
+const dateFormatter = new Intl.DateTimeFormat("en-GB", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric"
+});
+
+const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false
+});
+
+function withOpacity(hex: string, opacity: number) {
+  const normalized = hex.replace("#", "");
+  if (normalized.length !== 6) {
+    return hex;
+  }
+
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, opacity))})`;
+}
+
+function getStatusLabel(status: MeetingStatus) {
+  return statusLabelMap[status] ?? status;
+}
 
 function getDynamicEventTitleFontSize(title: string) {
   const length = title.trim().length;
@@ -276,6 +322,7 @@ function blankEventForm(dateValue: Date | undefined, scope: CalendarScope, owner
     id: null,
     title: "",
     description: "",
+    imageUrl: "",
     location: "",
     meetingLink: "",
     internalNotes: "",
@@ -304,6 +351,7 @@ function mapEventToForm(event: CalendarEvent): EventFormState {
     id: event.id,
     title: event.title,
     description: event.description ?? "",
+    imageUrl: event.imageUrl ?? "",
     location: event.location ?? "",
     meetingLink: event.meetingLink ?? "",
     internalNotes: event.internalNotes ?? "",
@@ -335,6 +383,20 @@ function applyFallbackEnd(start: Date, end: Date | null, scope: CalendarScope) {
   }
 
   return fallback;
+}
+
+function formatEntryRange(entry: CalendarEvent) {
+  const start = new Date(entry.startsAt);
+  const end = new Date(entry.endsAt);
+
+  if (entry.allDay) {
+    const endDisplay = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+    const startLabel = dateFormatter.format(start);
+    const endLabel = dateFormatter.format(endDisplay);
+    return startLabel === endLabel ? startLabel : `${startLabel} - ${endLabel}`;
+  }
+
+  return `${dateTimeFormatter.format(start)} - ${timeFormatter.format(end)}`;
 }
 
 export function CalendarDashboardClient({
@@ -381,7 +443,7 @@ export function CalendarDashboardClient({
 
   const calendarEvents: EventInput[] = useMemo(
     () =>
-      filteredEventsByView.map((event) => {
+      filteredEventsByView.flatMap((event) => {
         const sharedPersonal = event.calendarScope === "personal" && hasBothOwners(event);
         const personalColor =
           sharedPersonal
@@ -411,17 +473,34 @@ export function CalendarDashboardClient({
             ? `${getPersonalPrefix(event)} · ${event.title}`
             : event.title;
 
-        return {
+        const mainEvent: EventInput = {
           id: event.id,
           title,
           start: event.startsAt,
           end: event.endsAt,
-          allDay: event.calendarScope === "brand-campaign",
+          allDay: event.allDay,
           backgroundColor,
           borderColor: backgroundColor,
           textColor,
           extendedProps: { event }
         };
+
+        if (!event.allDay) {
+          return [mainEvent];
+        }
+
+        const backgroundLayer: EventInput = {
+          id: `${event.id}__bg`,
+          start: event.startsAt,
+          end: event.endsAt,
+          allDay: true,
+          display: "background",
+          backgroundColor: withOpacity(backgroundColor, 0.22),
+          classNames: ["tsl-all-day-bg"],
+          extendedProps: { eventId: event.id }
+        };
+
+        return [backgroundLayer, mainEvent];
       }),
     [filteredEventsByView, activeView]
   );
@@ -591,6 +670,7 @@ export function CalendarDashboardClient({
     const payload = {
       title: formState.title,
       description: formState.description,
+      imageUrl: formState.imageUrl,
       location: formState.location,
       meetingLink: formState.meetingLink,
       internalNotes: formState.internalNotes,
@@ -690,6 +770,8 @@ export function CalendarDashboardClient({
 
   function renderCalendarEventContent(argument: EventContentArg) {
     const layout = getCalendarEventTextLayout(argument);
+    const eventData = argument.event.extendedProps.event as CalendarEvent | undefined;
+    const showImage = Boolean(eventData?.imageUrl) && layout.titleClamp >= 2;
 
     return (
       <div className="flex h-full w-full flex-col gap-px overflow-hidden px-1 py-[1px]">
@@ -719,6 +801,14 @@ export function CalendarDashboardClient({
         >
           {argument.event.title}
         </div>
+        {showImage ? (
+          <img
+            src={eventData?.imageUrl ?? ""}
+            alt={argument.event.title}
+            className="mt-0.5 h-5 w-5 self-end rounded object-cover"
+            loading="lazy"
+          />
+        ) : null}
       </div>
     );
   }
@@ -742,7 +832,7 @@ export function CalendarDashboardClient({
                 variant={selectedStatuses.includes(status) ? "default" : "outline"}
                 onClick={() => toggleStatus(status)}
               >
-                {status}
+                {getStatusLabel(status)}
               </Button>
             ))}
           </div>
@@ -784,6 +874,7 @@ export function CalendarDashboardClient({
           <div className="min-w-[900px]">
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+              locale={enGbLocale}
               initialView={activeView === "brand-campaign" ? "dayGridMonth" : "timeGridWeek"}
               headerToolbar={{
                 left: "prev,next today",
@@ -820,10 +911,21 @@ export function CalendarDashboardClient({
                   <p className="text-sm font-semibold text-foreground">
                     {entry.calendarScope === "personal" ? `${getPersonalPrefix(entry)} · ${entry.title}` : entry.title}
                   </p>
-                  <RangeLabel label={entry.status} />
+                  <RangeLabel label={getStatusLabel(entry.status)} />
+
                   <p className="mt-2 text-xs text-muted-foreground">
-                    {new Date(entry.startsAt).toLocaleString()} - {new Date(entry.endsAt).toLocaleTimeString()}
+                    {formatEntryRange(entry)}
                   </p>
+                  {entry.imageUrl ? (
+                    <div className="mt-2 overflow-hidden rounded-lg border border-border/60">
+                      <img
+                        src={entry.imageUrl}
+                        alt={entry.title}
+                        className="h-16 w-full object-cover"
+                        loading="lazy"
+                      />
+                    </div>
+                  ) : null}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {entry.location ??
                       (entry.calendarScope === "brand-campaign"
@@ -842,7 +944,7 @@ export function CalendarDashboardClient({
 
         <CalendarShell title="Filter Summary">
           <p className="text-sm text-muted-foreground">
-            Showing {calendarEvents.length} entries in {getViewTitle(activeView)} across {selectedStatuses.length} status
+            Showing {filteredEventsByView.length} entries in {getViewTitle(activeView)} across {selectedStatuses.length} status
             filters.
           </p>
           {loading ? <p className="mt-2 text-xs text-muted-foreground">Refreshing calendar...</p> : null}
@@ -870,6 +972,15 @@ export function CalendarDashboardClient({
                 value={formState.title}
                 onChange={(event) => updateField("title", event.target.value)}
                 placeholder="Weekly Growth Standup"
+              />
+            </div>
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="imageUrl">Image URL (optional)</Label>
+              <Input
+                id="imageUrl"
+                value={formState.imageUrl}
+                onChange={(event) => updateField("imageUrl", event.target.value)}
+                placeholder="https://cdn.example.com/calendar-entry.jpg"
               />
             </div>
 
@@ -928,7 +1039,7 @@ export function CalendarDashboardClient({
                 <SelectContent>
                   {statusOptions.map((status) => (
                     <SelectItem key={status} value={status}>
-                      {status}
+                      {getStatusLabel(status)}
                     </SelectItem>
                   ))}
                 </SelectContent>

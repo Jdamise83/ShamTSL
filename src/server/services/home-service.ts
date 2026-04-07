@@ -249,9 +249,9 @@ export const homeService = {
           id: "unleashed",
           label: "Unleashed",
           value:
-            monthGroup?.metrics.find((metric) => metric.label.toLowerCase().includes("profit"))?.value ??
+            monthGroup?.metrics.find((metric) => metric.label.toLowerCase().includes("revenue"))?.value ??
             "-",
-          helper: "Month to date Total Profit"
+          helper: "Month to date Revenue"
         }
       ]
     };

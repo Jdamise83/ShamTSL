@@ -399,7 +399,7 @@ export function HolidayDashboardClient({ initialPayload }: HolidayDashboardClien
                     <TableCell>{adjustment.adjustmentType}</TableCell>
                     <TableCell>{adjustment.amountDays}</TableCell>
                     <TableCell>{adjustment.reason}</TableCell>
-                    <TableCell>{new Date(adjustment.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell>{new Date(adjustment.createdAt).toLocaleDateString("en-GB")}</TableCell>
                   </TableRow>
                 );
               })}
