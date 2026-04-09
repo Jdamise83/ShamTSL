@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { resolveDashboardRole } from "@/lib/access-control";
 import { hasSupabaseBrowserConfig } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { calendarService } from "@/server/services";
@@ -29,14 +30,8 @@ async function ensureAuthenticated(): Promise<AuthContext | null> {
     return null;
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role,email")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const role = profile?.role === "staff" ? "staff" : "admin";
-  const email = (profile?.email ?? user.email ?? "").trim().toLowerCase();
+  const email = (user.email ?? "").trim().toLowerCase();
+  const role = resolveDashboardRole(email);
 
   return {
     user: {

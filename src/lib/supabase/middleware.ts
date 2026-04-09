@@ -1,9 +1,14 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
+import {
+  getDefaultDashboardPath,
+  isAllowedDashboardPath,
+  resolveDashboardAccessLevel
+} from "@/lib/access-control";
 import { env, hasSupabaseBrowserConfig } from "@/lib/env";
 
-const publicRoutes = ["/login"];
+const publicRoutes = ["/login", "/app:auth:callback"];
 
 export async function updateSession(request: NextRequest) {
   if (!hasSupabaseBrowserConfig()) {
@@ -40,10 +45,6 @@ export async function updateSession(request: NextRequest) {
   );
   const isApiRoute = request.nextUrl.pathname.startsWith("/api/");
 
-  if (isApiRoute) {
-    return supabaseResponse;
-  }
-
   if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
@@ -51,9 +52,28 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && request.nextUrl.pathname === "/login") {
+  if (!user) {
+    return supabaseResponse;
+  }
+
+  const accessLevel = resolveDashboardAccessLevel(user.email);
+
+  if (isApiRoute) {
+    if (!isAllowedDashboardPath(request.nextUrl.pathname, accessLevel)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    return supabaseResponse;
+  }
+
+  if (!isAllowedDashboardPath(request.nextUrl.pathname, accessLevel)) {
     const url = request.nextUrl.clone();
-    url.pathname = "/home";
+    url.pathname = getDefaultDashboardPath(accessLevel);
+    return NextResponse.redirect(url);
+  }
+
+  if (request.nextUrl.pathname === "/login") {
+    const url = request.nextUrl.clone();
+    url.pathname = getDefaultDashboardPath(accessLevel);
     return NextResponse.redirect(url);
   }
 

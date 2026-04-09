@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { SidebarNav } from "@/components/layout/sidebar-nav";
 import { TopBar } from "@/components/layout/top-bar";
+import { resolveDashboardAccessLevel } from "@/lib/access-control";
 import { hasSupabaseBrowserConfig } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -49,16 +50,14 @@ export default async function ProtectedLayout({
     redirect("/login");
   }
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-
-  const role = profile?.role === "staff" ? "staff" : "admin";
+  const accessLevel = resolveDashboardAccessLevel(user.email);
   const signedInName = resolveSignedInName(user.email ?? "");
 
   return (
     <div className="min-h-screen lg:flex">
-      <SidebarNav role={role} />
+      <SidebarNav accessLevel={accessLevel} />
       <div className="flex-1">
-        <MobileNav role={role} />
+        <MobileNav accessLevel={accessLevel} />
         <main className="relative mx-auto max-w-[1600px] px-4 py-6 sm:px-8 lg:px-10">
           <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden rounded-3xl">
             <div className="tsl-page-watermark" />

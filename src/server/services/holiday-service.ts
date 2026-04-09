@@ -2,6 +2,7 @@ import "server-only";
 
 import { addDays, formatISO, getDaysInMonth, isWithinInterval, parseISO } from "date-fns";
 
+import { resolveDashboardRole } from "@/lib/access-control";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   seededHolidayAdjustments,
@@ -154,7 +155,7 @@ async function getCurrentUserContext() {
     supabase,
     user,
     profile,
-    role: profile?.role === "staff" ? "staff" : "admin",
+    role: resolveDashboardRole(profile?.email ?? user.email ?? ""),
     staffMemberId: staffMember?.id ?? null
   };
 }

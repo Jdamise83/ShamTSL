@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { SectionHeader } from "@/components/dashboard/section-header";
 import { CalendarDashboardClient } from "@/components/calendar/calendar-dashboard-client";
+import { resolveDashboardAccessLevel, resolveDashboardRole } from "@/lib/access-control";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { calendarService } from "@/server/services";
 
@@ -15,14 +16,9 @@ export default async function CalendarPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role,email")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const role = profile?.role === "staff" ? "staff" : "admin";
-  const email = (profile?.email ?? user.email ?? "").trim().toLowerCase();
+  const email = (user.email ?? "").trim().toLowerCase();
+  const accessLevel = resolveDashboardAccessLevel(email);
+  const role = resolveDashboardRole(email);
 
   const initialEvents = await calendarService.listEvents({
     access: {
@@ -32,7 +28,7 @@ export default async function CalendarPage() {
     }
   });
 
-  if (role === "staff") {
+  if (accessLevel !== "full") {
     return (
       <div className="space-y-8">
         <SectionHeader

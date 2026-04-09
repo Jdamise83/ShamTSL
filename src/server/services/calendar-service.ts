@@ -30,6 +30,19 @@ function displayNameFromEmail(email: string) {
   return email.split("@")[0].replace(/[._-]/g, " ");
 }
 
+function normalizeHexColor(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+    return null;
+  }
+
+  return normalized.toUpperCase();
+}
+
 function isCalendarScope(value: unknown): value is CalendarScope {
   return typeof value === "string" && calendarScopes.includes(value as CalendarScope);
 }
@@ -48,6 +61,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
     allDay: false,
     notes: null as string | null,
     imageUrl: null as string | null,
+    customColor: null as string | null,
     ownerEmail: null as string | null,
     calendarScope: "main" as CalendarScope,
     personalOwner: null as PersonalCalendarOwner | null,
@@ -71,6 +85,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
       eventType?: CalendarItemType;
       allDay?: boolean;
       imageUrl?: string | null;
+      customColor?: string | null;
       ownerEmail?: string | null;
       calendarScope?: CalendarScope;
       personalOwner?: PersonalCalendarOwner | null;
@@ -88,6 +103,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
         : "main";
     const calendarScope = isCalendarScope(parsed.calendarScope) ? parsed.calendarScope : inferredScope;
     const imageUrl = typeof parsed.imageUrl === "string" && parsed.imageUrl.trim() ? parsed.imageUrl.trim() : null;
+    const customColor = normalizeHexColor(parsed.customColor);
     const ownerEmail =
       typeof parsed.ownerEmail === "string" && parsed.ownerEmail.trim()
         ? parsed.ownerEmail.trim().toLowerCase()
@@ -99,6 +115,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
       allDay: parsed.allDay === true,
       notes,
       imageUrl,
+      customColor,
       ownerEmail,
       calendarScope,
       personalOwner,
@@ -115,6 +132,7 @@ function buildInternalNotesPayload(
   eventType: CalendarItemType,
   allDay: boolean,
   imageUrl: string | null,
+  customColor: string | null,
   ownerEmail: string | null,
   calendarScope: CalendarScope,
   personalOwner: PersonalCalendarOwner | null,
@@ -126,6 +144,7 @@ function buildInternalNotesPayload(
     eventType !== "meeting" ||
     allDay ||
     imageUrl !== null ||
+    customColor !== null ||
     ownerEmail !== null ||
     calendarScope !== "main" ||
     personalOwner !== null ||
@@ -140,6 +159,7 @@ function buildInternalNotesPayload(
     eventType,
     allDay,
     imageUrl,
+    customColor,
     ownerEmail,
     calendarScope,
     personalOwner,
@@ -157,6 +177,7 @@ function mapEventRow(row: any): CalendarEvent {
     title: row.title,
     description: row.description,
     imageUrl: normalized.imageUrl,
+    customColor: normalized.customColor,
     ownerEmail: normalized.ownerEmail,
     location: row.location,
     meetingLink: row.meeting_link,
@@ -383,6 +404,7 @@ export const calendarService = {
       calendarScope === "personal" && input.ownerEmail
         ? normalizeEmail(input.ownerEmail)
         : null;
+    const customColor = normalizeHexColor(input.customColor);
     const personalOwner = input.personalOwner ?? null;
     const brandCampaignType = input.brandCampaignType ?? null;
     const notifyBoth = input.notifyBoth === true;
@@ -391,6 +413,7 @@ export const calendarService = {
       eventType,
       allDay,
       input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      customColor,
       ownerEmail,
       calendarScope,
       personalOwner,
@@ -451,6 +474,7 @@ export const calendarService = {
       title: input.title,
       description: input.description ?? null,
       imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      customColor,
       ownerEmail,
       location: input.location ?? null,
       meetingLink: input.meetingLink ?? null,
@@ -492,6 +516,7 @@ export const calendarService = {
       calendarScope === "personal" && input.ownerEmail
         ? normalizeEmail(input.ownerEmail)
         : null;
+    const customColor = normalizeHexColor(input.customColor);
     const personalOwner = input.personalOwner ?? null;
     const brandCampaignType = input.brandCampaignType ?? null;
     const notifyBoth = input.notifyBoth === true;
@@ -500,6 +525,7 @@ export const calendarService = {
       eventType,
       allDay,
       input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      customColor,
       ownerEmail,
       calendarScope,
       personalOwner,
@@ -567,6 +593,7 @@ export const calendarService = {
             title: input.title,
             description: input.description ?? null,
             imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+            customColor,
             ownerEmail,
             location: input.location ?? null,
             meetingLink: input.meetingLink ?? null,
@@ -610,6 +637,7 @@ export const calendarService = {
       title: event.title,
       description: event.description ?? undefined,
       imageUrl: event.imageUrl ?? undefined,
+      customColor: event.customColor ?? undefined,
       location: event.location ?? undefined,
       meetingLink: event.meetingLink ?? undefined,
       internalNotes: event.internalNotes ?? undefined,

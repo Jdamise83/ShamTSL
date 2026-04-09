@@ -15,6 +15,7 @@ import {
   Umbrella
 } from "lucide-react";
 
+import type { DashboardAccessLevel } from "@/lib/access-control";
 import { cn } from "@/lib/utils";
 
 const adminNavigation = [
@@ -31,19 +32,24 @@ const adminNavigation = [
 ];
 
 const staffNavigation = [
-  { href: "/calendar", label: "My Calendar", icon: Calendar },
-  { href: "/shopify", label: "Shopify", icon: ShoppingBag },
-  { href: "/unleashed", label: "Unleashed", icon: Factory },
-  { href: "/google-ads", label: "Google Ads", icon: Megaphone },
-  { href: "/ga4", label: "GA4", icon: ChartColumn },
-  { href: "/seo", label: "SEO", icon: Search },
-  { href: "/holidays", label: "Holidays", icon: Umbrella },
-  { href: "/settings", label: "Settings", icon: Cog }
+  { href: "/calendar", label: "Personal Calendar", icon: Calendar },
+  { href: "/holidays", label: "Holidays", icon: Umbrella }
 ];
 
-export function SidebarNav({ role = "admin" }: { role?: "staff" | "admin" }) {
+const unleashedStaffNavigation = [
+  { href: "/calendar", label: "Personal Calendar", icon: Calendar },
+  { href: "/unleashed", label: "Unleashed", icon: Factory },
+  { href: "/holidays", label: "Holidays", icon: Umbrella }
+];
+
+export function SidebarNav({ accessLevel = "full" }: { accessLevel?: DashboardAccessLevel }) {
   const pathname = usePathname();
-  const navigation = role === "staff" ? staffNavigation : adminNavigation;
+  const navigation =
+    accessLevel === "full"
+      ? adminNavigation
+      : accessLevel === "staff-unleashed"
+        ? unleashedStaffNavigation
+        : staffNavigation;
 
   return (
     <aside className="sticky top-0 hidden h-screen w-72 border-r border-white/25 bg-[#0396FF] px-5 py-8 text-white lg:block">

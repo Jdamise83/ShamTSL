@@ -59,6 +59,7 @@ interface EventFormState {
   title: string;
   description: string;
   imageUrl: string;
+  customColor: string;
   location: string;
   meetingLink: string;
   internalNotes: string;
@@ -120,6 +121,18 @@ const brandColor = "#bfdbfe";
 const campaignColor = "#bbf7d0";
 const taskColor = "#facc15";
 const defaultEventColor = "#fca5a5";
+const eventColorPresets = [
+  "#2F74FF",
+  "#0EA5A3",
+  "#7C3AED",
+  "#D14343",
+  "#F59E0B",
+  "#16A34A",
+  "#E11D48",
+  "#8B5CF6",
+  "#0891B2",
+  "#475569"
+];
 
 const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
   day: "2-digit",
@@ -153,6 +166,20 @@ function withOpacity(hex: string, opacity: number) {
   const b = Number.parseInt(normalized.slice(4, 6), 16);
 
   return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, opacity))})`;
+}
+
+function resolveTextColorForHex(hex: string, fallback: string) {
+  const normalized = hex.replace("#", "");
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) {
+    return fallback;
+  }
+
+  const r = Number.parseInt(normalized.slice(0, 2), 16);
+  const g = Number.parseInt(normalized.slice(2, 4), 16);
+  const b = Number.parseInt(normalized.slice(4, 6), 16);
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+
+  return brightness >= 150 ? "#0f172a" : "#ffffff";
 }
 
 function getStatusLabel(status: MeetingStatus) {
@@ -329,6 +356,7 @@ function blankEventForm(dateValue: Date | undefined, scope: CalendarScope, owner
     title: "",
     description: "",
     imageUrl: "",
+    customColor: "",
     location: "",
     meetingLink: "",
     internalNotes: "",
@@ -358,6 +386,7 @@ function mapEventToForm(event: CalendarEvent): EventFormState {
     title: event.title,
     description: event.description ?? "",
     imageUrl: event.imageUrl ?? "",
+    customColor: event.customColor ?? "",
     location: event.location ?? "",
     meetingLink: event.meetingLink ?? "",
     internalNotes: event.internalNotes ?? "",
@@ -478,7 +507,7 @@ export function CalendarDashboardClient({
               ? personalDirectory.john.color
               : personalDirectory.dylan.color;
 
-        const backgroundColor =
+        const defaultBackgroundColor =
           event.calendarScope === "brand-campaign"
             ? event.brandCampaignType === "brand"
               ? brandColor
@@ -490,9 +519,17 @@ export function CalendarDashboardClient({
                 : event.eventType === "event"
                   ? defaultEventColor
                   : statusColorMap[event.status];
+        const backgroundColor = event.customColor ?? defaultBackgroundColor;
 
         const textColor =
-          event.calendarScope === "brand-campaign" || event.eventType === "task" ? "#0f172a" : "#ffffff";
+          event.customColor
+            ? resolveTextColorForHex(
+                event.customColor,
+                event.calendarScope === "brand-campaign" || event.eventType === "task" ? "#0f172a" : "#ffffff"
+              )
+            : event.calendarScope === "brand-campaign" || event.eventType === "task"
+              ? "#0f172a"
+              : "#ffffff";
 
         const title =
           !staffMode && activeView === "main" && event.calendarScope === "personal"
@@ -708,6 +745,7 @@ export function CalendarDashboardClient({
       title: formState.title,
       description: formState.description,
       imageUrl: formState.imageUrl,
+      customColor: formState.customColor || null,
       location: formState.location,
       meetingLink: formState.meetingLink,
       internalNotes: formState.internalNotes,
@@ -1024,6 +1062,47 @@ export function CalendarDashboardClient({
                 onChange={(event) => updateField("imageUrl", event.target.value)}
                 placeholder="https://cdn.example.com/calendar-entry.jpg"
               />
+            </div>
+            <div className="space-y-1.5 md:col-span-2">
+              <Label htmlFor="customColor">Event Color</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  id="customColor"
+                  type="color"
+                  value={formState.customColor || "#2f74ff"}
+                  onChange={(event) => updateField("customColor", event.target.value)}
+                  className="h-10 w-16 p-1"
+                />
+                <Input
+                  value={formState.customColor}
+                  onChange={(event) => updateField("customColor", event.target.value)}
+                  placeholder="#2F74FF"
+                  className="w-[150px] font-mono uppercase"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => updateField("customColor", "")}
+                >
+                  Reset
+                </Button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {eventColorPresets.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => updateField("customColor", preset)}
+                    className={`h-6 w-6 rounded-full border border-border/60 ${
+                      formState.customColor.toUpperCase() === preset ? "ring-2 ring-offset-2 ring-primary" : ""
+                    }`}
+                    style={{ backgroundColor: preset }}
+                    aria-label={`Select color ${preset}`}
+                    title={preset}
+                  />
+                ))}
+              </div>
             </div>
 
             {effectiveFormScope !== "brand-campaign" ? (

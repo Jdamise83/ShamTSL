@@ -6,6 +6,7 @@ import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RangeLabel } from "@/components/dashboard/range-label";
 import { SectionHeader } from "@/components/dashboard/section-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { resolveDashboardAccessLevel } from "@/lib/access-control";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { homeService } from "@/server/services";
 import type { CalendarEvent } from "@/types/calendar";
@@ -56,14 +57,8 @@ export default async function HomePage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (profile?.role === "staff") {
-    redirect("/holidays");
+  if (resolveDashboardAccessLevel(user.email) !== "full") {
+    redirect("/calendar");
   }
 
   const data = await homeService.getOverview();

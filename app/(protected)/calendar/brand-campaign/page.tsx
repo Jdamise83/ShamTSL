@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { CalendarDashboardClient } from "@/components/calendar/calendar-dashboard-client";
 import { SectionHeader } from "@/components/dashboard/section-header";
+import { resolveDashboardAccessLevel } from "@/lib/access-control";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { calendarService } from "@/server/services";
 
@@ -15,8 +16,7 @@ export default async function BrandCampaignCalendarPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (profile?.role === "staff") {
+  if (resolveDashboardAccessLevel(user.email) !== "full") {
     redirect("/calendar");
   }
 
