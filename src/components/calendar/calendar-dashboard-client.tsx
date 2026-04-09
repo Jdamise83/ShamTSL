@@ -521,15 +521,9 @@ export function CalendarDashboardClient({
                   : statusColorMap[event.status];
         const backgroundColor = event.customColor ?? defaultBackgroundColor;
 
-        const textColor =
-          event.customColor
-            ? resolveTextColorForHex(
-                event.customColor,
-                event.calendarScope === "brand-campaign" || event.eventType === "task" ? "#0f172a" : "#ffffff"
-              )
-            : event.calendarScope === "brand-campaign" || event.eventType === "task"
-              ? "#0f172a"
-              : "#ffffff";
+        const defaultTextColor =
+          event.calendarScope === "brand-campaign" || event.eventType === "task" ? "#0f172a" : "#ffffff";
+        const textColor = resolveTextColorForHex(backgroundColor, defaultTextColor);
 
         const title =
           !staffMode && activeView === "main" && event.calendarScope === "personal"
@@ -847,6 +841,7 @@ export function CalendarDashboardClient({
     const layout = getCalendarEventTextLayout(argument);
     const eventData = argument.event.extendedProps.event as CalendarEvent | undefined;
     const showImage = Boolean(eventData?.imageUrl) && layout.titleClamp >= 2;
+    const displayTextColor = argument.view.type === "dayGridMonth" ? "#0f172a" : argument.textColor ?? "#ffffff";
 
     return (
       <div className="flex h-full w-full flex-col gap-px overflow-hidden px-1 py-[1px]">
@@ -854,7 +849,7 @@ export function CalendarDashboardClient({
           <div
             className="truncate leading-tight"
             style={{
-              color: argument.textColor ?? "#ffffff",
+              color: displayTextColor,
               fontSize: layout.timeFontSize
             }}
           >
@@ -867,7 +862,7 @@ export function CalendarDashboardClient({
             fontSize: layout.titleFontSize,
             wordBreak: "break-word",
             overflowWrap: "anywhere",
-            color: argument.textColor ?? "#ffffff",
+            color: displayTextColor,
             display: "-webkit-box",
             WebkitLineClamp: layout.titleClamp,
             WebkitBoxOrient: "vertical",
