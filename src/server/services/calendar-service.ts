@@ -20,6 +20,12 @@ const calendarScopes: CalendarScope[] = ["main", "personal", "brand-campaign"];
 const personalOwners: PersonalCalendarOwner[] = ["dylan", "john"];
 const brandCampaignTypes: BrandCampaignType[] = ["brand", "campaign"];
 
+type CalendarAccessContext = {
+  role: "admin" | "staff";
+  userId: string;
+  email: string;
+};
+
 function displayNameFromEmail(email: string) {
   return email.split("@")[0].replace(/[._-]/g, " ");
 }
@@ -42,6 +48,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
     allDay: false,
     notes: null as string | null,
     imageUrl: null as string | null,
+    ownerEmail: null as string | null,
     calendarScope: "main" as CalendarScope,
     personalOwner: null as PersonalCalendarOwner | null,
     brandCampaignType: null as BrandCampaignType | null,
@@ -64,6 +71,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
       eventType?: CalendarItemType;
       allDay?: boolean;
       imageUrl?: string | null;
+      ownerEmail?: string | null;
       calendarScope?: CalendarScope;
       personalOwner?: PersonalCalendarOwner | null;
       brandCampaignType?: BrandCampaignType | null;
@@ -80,6 +88,10 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
         : "main";
     const calendarScope = isCalendarScope(parsed.calendarScope) ? parsed.calendarScope : inferredScope;
     const imageUrl = typeof parsed.imageUrl === "string" && parsed.imageUrl.trim() ? parsed.imageUrl.trim() : null;
+    const ownerEmail =
+      typeof parsed.ownerEmail === "string" && parsed.ownerEmail.trim()
+        ? parsed.ownerEmail.trim().toLowerCase()
+        : null;
     const notes = notesLines.join("\n").trim() || null;
 
     return {
@@ -87,6 +99,7 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
       allDay: parsed.allDay === true,
       notes,
       imageUrl,
+      ownerEmail,
       calendarScope,
       personalOwner,
       brandCampaignType,
@@ -102,6 +115,7 @@ function buildInternalNotesPayload(
   eventType: CalendarItemType,
   allDay: boolean,
   imageUrl: string | null,
+  ownerEmail: string | null,
   calendarScope: CalendarScope,
   personalOwner: PersonalCalendarOwner | null,
   brandCampaignType: BrandCampaignType | null,
@@ -112,6 +126,7 @@ function buildInternalNotesPayload(
     eventType !== "meeting" ||
     allDay ||
     imageUrl !== null ||
+    ownerEmail !== null ||
     calendarScope !== "main" ||
     personalOwner !== null ||
     brandCampaignType !== null ||
@@ -125,6 +140,7 @@ function buildInternalNotesPayload(
     eventType,
     allDay,
     imageUrl,
+    ownerEmail,
     calendarScope,
     personalOwner,
     brandCampaignType,
@@ -141,6 +157,7 @@ function mapEventRow(row: any): CalendarEvent {
     title: row.title,
     description: row.description,
     imageUrl: normalized.imageUrl,
+    ownerEmail: normalized.ownerEmail,
     location: row.location,
     meetingLink: row.meeting_link,
     internalNotes: normalized.notes,
@@ -198,6 +215,36 @@ function eventFingerprint(event: CalendarEvent) {
   return `${event.title.toLowerCase()}|${event.startsAt}|${event.endsAt}`;
 }
 
+function normalizeEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function localPart(value: string) {
+  return normalizeEmail(value).split("@")[0] ?? "";
+}
+
+function canStaffSeeEvent(event: CalendarEvent, access: CalendarAccessContext) {
+  if (event.calendarScope !== "personal") {
+    return false;
+  }
+
+  const userEmail = normalizeEmail(access.email);
+  const matchesOwnerEmail = event.ownerEmail ? normalizeEmail(event.ownerEmail) === userEmail : false;
+  const matchesLegacyOwner =
+    event.personalOwner !== null && normalizeEmail(event.personalOwner) === localPart(userEmail);
+  const matchesCreatedBy = event.createdBy === access.userId;
+
+  return matchesOwnerEmail || matchesLegacyOwner || matchesCreatedBy;
+}
+
+function filterByAccess(events: CalendarEvent[], access?: CalendarAccessContext) {
+  if (!access || access.role === "admin") {
+    return events;
+  }
+
+  return events.filter((event) => canStaffSeeEvent(event, access));
+}
+
 function mergeWithProvisionalTradeShows(events: CalendarEvent[]) {
   const existing = new Set(events.map(eventFingerprint));
   const merged = [...events];
@@ -247,19 +294,31 @@ async function fetchSupabaseEvents(start?: string, end?: string, filters?: Calen
 }
 
 export const calendarService = {
-  async listEvents({ start, end, filters }: { start?: string; end?: string; filters?: CalendarFilters } = {}) {
+  async listEvents({
+    start,
+    end,
+    filters,
+    access
+  }: {
+    start?: string;
+    end?: string;
+    filters?: CalendarFilters;
+    access?: CalendarAccessContext;
+  } = {}) {
     const supabaseEvents = await fetchSupabaseEvents(start, end, filters);
     if (supabaseEvents) {
       const merged = mergeWithProvisionalTradeShows(supabaseEvents);
       const filteredByDate = filterByDateRange(merged, start, end);
-      return filterByStatuses(filteredByDate, filters).sort(
+      const filteredByScope = filterByAccess(filteredByDate, access);
+      return filterByStatuses(filteredByScope, filters).sort(
         (a, b) => parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime()
       );
     }
 
     const merged = mergeWithProvisionalTradeShows(inMemoryCalendarEvents);
     const filteredByDate = filterByDateRange(merged, start, end);
-    return filterByStatuses(filteredByDate, filters).sort((a, b) =>
+    const filteredByScope = filterByAccess(filteredByDate, access);
+    return filterByStatuses(filteredByScope, filters).sort((a, b) =>
       parseISO(a.startsAt).getTime() - parseISO(b.startsAt).getTime()
     );
   },
@@ -320,6 +379,10 @@ export const calendarService = {
     const eventType = input.eventType ?? "meeting";
     const allDay = input.allDay === true || input.calendarScope === "brand-campaign";
     const calendarScope = input.calendarScope ?? "main";
+    const ownerEmail =
+      calendarScope === "personal" && input.ownerEmail
+        ? normalizeEmail(input.ownerEmail)
+        : null;
     const personalOwner = input.personalOwner ?? null;
     const brandCampaignType = input.brandCampaignType ?? null;
     const notifyBoth = input.notifyBoth === true;
@@ -328,6 +391,7 @@ export const calendarService = {
       eventType,
       allDay,
       input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      ownerEmail,
       calendarScope,
       personalOwner,
       brandCampaignType,
@@ -387,6 +451,7 @@ export const calendarService = {
       title: input.title,
       description: input.description ?? null,
       imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      ownerEmail,
       location: input.location ?? null,
       meetingLink: input.meetingLink ?? null,
       internalNotes: input.internalNotes ?? null,
@@ -423,6 +488,10 @@ export const calendarService = {
     const eventType = input.eventType ?? "meeting";
     const allDay = input.allDay === true || input.calendarScope === "brand-campaign";
     const calendarScope = input.calendarScope ?? "main";
+    const ownerEmail =
+      calendarScope === "personal" && input.ownerEmail
+        ? normalizeEmail(input.ownerEmail)
+        : null;
     const personalOwner = input.personalOwner ?? null;
     const brandCampaignType = input.brandCampaignType ?? null;
     const notifyBoth = input.notifyBoth === true;
@@ -431,6 +500,7 @@ export const calendarService = {
       eventType,
       allDay,
       input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+      ownerEmail,
       calendarScope,
       personalOwner,
       brandCampaignType,
@@ -497,6 +567,7 @@ export const calendarService = {
             title: input.title,
             description: input.description ?? null,
             imageUrl: input.imageUrl?.trim() ? input.imageUrl.trim() : null,
+            ownerEmail,
             location: input.location ?? null,
             meetingLink: input.meetingLink ?? null,
             internalNotes: input.internalNotes ?? null,
@@ -545,6 +616,7 @@ export const calendarService = {
       status: event.status,
       eventType: event.eventType,
       allDay: event.allDay,
+      ownerEmail: event.ownerEmail ?? undefined,
       calendarScope: event.calendarScope,
       personalOwner: event.personalOwner,
       brandCampaignType: event.brandCampaignType,

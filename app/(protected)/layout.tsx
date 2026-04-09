@@ -58,7 +58,7 @@ export default async function ProtectedLayout({
     <div className="min-h-screen lg:flex">
       <SidebarNav role={role} />
       <div className="flex-1">
-        <MobileNav />
+        <MobileNav role={role} />
         <main className="relative mx-auto max-w-[1600px] px-4 py-6 sm:px-8 lg:px-10">
           <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden rounded-3xl">
             <div className="tsl-page-watermark" />

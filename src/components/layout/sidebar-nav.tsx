@@ -17,7 +17,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-const navigation = [
+const adminNavigation = [
   { href: "/calendar", label: "Main Calendar", icon: Calendar },
   { href: "/calendar/personal", label: "Personal Calendar", icon: Users },
   { href: "/calendar/brand-campaign", label: "Brand Calendar", icon: LayoutGrid },
@@ -30,8 +30,20 @@ const navigation = [
   { href: "/settings", label: "Settings", icon: Cog }
 ];
 
-export function SidebarNav({ role: _role }: { role?: "staff" | "admin" }) {
+const staffNavigation = [
+  { href: "/calendar", label: "My Calendar", icon: Calendar },
+  { href: "/shopify", label: "Shopify", icon: ShoppingBag },
+  { href: "/unleashed", label: "Unleashed", icon: Factory },
+  { href: "/google-ads", label: "Google Ads", icon: Megaphone },
+  { href: "/ga4", label: "GA4", icon: ChartColumn },
+  { href: "/seo", label: "SEO", icon: Search },
+  { href: "/holidays", label: "Holidays", icon: Umbrella },
+  { href: "/settings", label: "Settings", icon: Cog }
+];
+
+export function SidebarNav({ role = "admin" }: { role?: "staff" | "admin" }) {
   const pathname = usePathname();
+  const navigation = role === "staff" ? staffNavigation : adminNavigation;
 
   return (
     <aside className="sticky top-0 hidden h-screen w-72 border-r border-white/25 bg-[#0396FF] px-5 py-8 text-white lg:block">

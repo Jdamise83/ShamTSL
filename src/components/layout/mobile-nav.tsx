@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 
-const links = [
+const adminLinks = [
   { href: "/calendar", label: "Main Cal" },
   { href: "/calendar/personal", label: "Personal Cal" },
   { href: "/calendar/brand-campaign", label: "Brand Cal" },
@@ -18,8 +18,20 @@ const links = [
   { href: "/settings", label: "Settings" }
 ];
 
-export function MobileNav() {
+const staffLinks = [
+  { href: "/calendar", label: "My Cal" },
+  { href: "/shopify", label: "Shopify" },
+  { href: "/unleashed", label: "Unleashed" },
+  { href: "/google-ads", label: "Ads" },
+  { href: "/ga4", label: "GA4" },
+  { href: "/seo", label: "SEO" },
+  { href: "/holidays", label: "Holidays" },
+  { href: "/settings", label: "Settings" }
+];
+
+export function MobileNav({ role = "admin" }: { role?: "staff" | "admin" }) {
   const pathname = usePathname();
+  const links = role === "staff" ? staffLinks : adminLinks;
 
   return (
     <div className="overflow-x-auto border-b border-border bg-card px-4 py-3 lg:hidden">

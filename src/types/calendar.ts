@@ -17,6 +17,7 @@ export interface CalendarEvent {
   title: string;
   description: string | null;
   imageUrl: string | null;
+  ownerEmail: string | null;
   location: string | null;
   meetingLink: string | null;
   internalNotes: string | null;
@@ -39,6 +40,7 @@ export interface CalendarEventInput {
   title: string;
   description?: string;
   imageUrl?: string;
+  ownerEmail?: string | null;
   location?: string;
   meetingLink?: string;
   internalNotes?: string;

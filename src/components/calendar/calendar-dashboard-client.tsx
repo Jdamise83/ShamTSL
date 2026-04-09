@@ -48,6 +48,8 @@ import type {
 interface CalendarDashboardClientProps {
   initialEvents: CalendarEvent[];
   initialView?: CalendarScope;
+  staffMode?: boolean;
+  staffEmail?: string;
 }
 
 type PersonalOwnerFilter = PersonalCalendarOwner | "all";
@@ -405,7 +407,9 @@ function formatEntryRange(entry: CalendarEvent) {
 
 export function CalendarDashboardClient({
   initialEvents,
-  initialView = "main"
+  initialView = "main",
+  staffMode = false,
+  staffEmail
 }: CalendarDashboardClientProps) {
   const [events, setEvents] = useState(initialEvents);
   const [selectedStatuses, setSelectedStatuses] = useState<MeetingStatus[]>(statusOptions);
@@ -418,12 +422,30 @@ export function CalendarDashboardClient({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const normalizedStaffEmail = (staffEmail ?? "").trim().toLowerCase();
+  const effectiveFormScope: CalendarScope = staffMode ? "main" : formState.calendarScope;
 
   const filteredEventsByView = useMemo(
     () =>
       events
         .filter((event) => selectedStatuses.includes(event.status))
         .filter((event) => {
+          if (staffMode) {
+            if (event.calendarScope !== "personal") {
+              return false;
+            }
+
+            if (!normalizedStaffEmail) {
+              return true;
+            }
+
+            if (event.ownerEmail && event.ownerEmail.toLowerCase() === normalizedStaffEmail) {
+              return true;
+            }
+
+            return event.attendees.some((attendee) => attendee.email.toLowerCase() === normalizedStaffEmail);
+          }
+
           if (activeView === "personal") {
             if (event.calendarScope !== "personal") {
               return false;
@@ -442,7 +464,7 @@ export function CalendarDashboardClient({
 
           return event.calendarScope === "main" || event.calendarScope === "personal";
         }),
-    [events, selectedStatuses, activeView, personalOwnerFilter]
+    [events, selectedStatuses, activeView, personalOwnerFilter, normalizedStaffEmail, staffMode]
   );
 
   const calendarEvents: EventInput[] = useMemo(
@@ -473,7 +495,7 @@ export function CalendarDashboardClient({
           event.calendarScope === "brand-campaign" || event.eventType === "task" ? "#0f172a" : "#ffffff";
 
         const title =
-          activeView === "main" && event.calendarScope === "personal"
+          !staffMode && activeView === "main" && event.calendarScope === "personal"
             ? `${getPersonalPrefix(event)} · ${event.title}`
             : event.title;
 
@@ -506,7 +528,7 @@ export function CalendarDashboardClient({
 
         return [backgroundLayer, mainEvent];
       }),
-    [filteredEventsByView, activeView]
+    [filteredEventsByView, activeView, staffMode]
   );
 
   const upcomingEntries = useMemo(
@@ -546,7 +568,7 @@ export function CalendarDashboardClient({
 
   function handleDateClick(argument: DateClickArg) {
     setFormMode("create");
-    setFormState(blankEventForm(argument.date, activeView, personalOwnerFilter));
+    setFormState(blankEventForm(argument.date, staffMode ? "main" : activeView, personalOwnerFilter));
     setFormOpen(true);
   }
 
@@ -643,7 +665,7 @@ export function CalendarDashboardClient({
       return;
     }
 
-    const calendarScope = formState.calendarScope;
+    const calendarScope = effectiveFormScope;
     const eventType = calendarScope === "brand-campaign" ? "event" : formState.eventType;
 
     let startsAt = formState.startsAt;
@@ -734,7 +756,7 @@ export function CalendarDashboardClient({
       }
 
       setFormOpen(false);
-      setFormState(blankEventForm(undefined, activeView, personalOwnerFilter));
+      setFormState(blankEventForm(undefined, staffMode ? "main" : activeView, personalOwnerFilter));
       await refreshEvents();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Entry save failed.");
@@ -761,7 +783,7 @@ export function CalendarDashboardClient({
       }
 
       setFormOpen(false);
-      setFormState(blankEventForm(undefined, activeView, personalOwnerFilter));
+      setFormState(blankEventForm(undefined, staffMode ? "main" : activeView, personalOwnerFilter));
       await refreshEvents();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not delete entry.");
@@ -828,8 +850,11 @@ export function CalendarDashboardClient({
     );
   }
 
-  const viewSubtitle =
-    activeView === "personal"
+  const viewTitle = staffMode ? "My Calendar" : getViewTitle(activeView);
+  const createButtonLabel = staffMode ? "Create Entry" : getCreateButtonLabel(activeView);
+  const viewSubtitle = staffMode
+    ? "Private calendar for your account only. Other staff and main calendar entries are hidden."
+    : activeView === "personal"
       ? "Separate Dylan and John calendars with shared scheduling + alignment controls."
       : activeView === "brand-campaign"
         ? "Light blue blocks for brand activity and light green blocks for campaigns across selected days."
@@ -837,7 +862,7 @@ export function CalendarDashboardClient({
 
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.7fr_0.8fr]">
-      <CalendarShell title={getViewTitle(activeView)} subtitle={viewSubtitle}>
+      <CalendarShell title={viewTitle} subtitle={viewSubtitle}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap gap-2">
             {statusOptions.map((status) => (
@@ -854,11 +879,11 @@ export function CalendarDashboardClient({
           <Button
             onClick={() => {
               setFormMode("create");
-              setFormState(blankEventForm(undefined, activeView, personalOwnerFilter));
+              setFormState(blankEventForm(undefined, staffMode ? "main" : activeView, personalOwnerFilter));
               setFormOpen(true);
             }}
           >
-            {getCreateButtonLabel(activeView)}
+            {createButtonLabel}
           </Button>
         </div>
 
@@ -924,7 +949,9 @@ export function CalendarDashboardClient({
               upcomingEntries.map((entry) => (
                 <div key={entry.id} className="rounded-xl border border-border/70 bg-muted/40 px-3 py-3">
                   <p className="text-sm font-semibold text-foreground">
-                    {entry.calendarScope === "personal" ? `${getPersonalPrefix(entry)} · ${entry.title}` : entry.title}
+                    {!staffMode && entry.calendarScope === "personal"
+                      ? `${getPersonalPrefix(entry)} · ${entry.title}`
+                      : entry.title}
                   </p>
                   <RangeLabel label={getStatusLabel(entry.status)} />
 
@@ -959,7 +986,7 @@ export function CalendarDashboardClient({
 
         <CalendarShell title="Filter Summary">
           <p className="text-sm text-muted-foreground">
-            Showing {filteredEventsByView.length} entries in {getViewTitle(activeView)} across {selectedStatuses.length} status
+            Showing {filteredEventsByView.length} entries in {viewTitle} across {selectedStatuses.length} status
             filters.
           </p>
           {loading ? <p className="mt-2 text-xs text-muted-foreground">Refreshing calendar...</p> : null}
@@ -971,9 +998,9 @@ export function CalendarDashboardClient({
           <DialogHeader>
             <DialogTitle>{formMode === "create" ? "Create Entry" : "Edit Entry"}</DialogTitle>
             <DialogDescription>
-              {formState.calendarScope === "brand-campaign"
+              {effectiveFormScope === "brand-campaign"
                 ? "Schedule brand or campaign blocks that span one or many days."
-                : formState.calendarScope === "personal"
+                : effectiveFormScope === "personal"
                   ? "Personal scheduling for Dylan and John, with optional shared attendance."
                   : "Main operations scheduling with attendees, links, and notes."}
             </DialogDescription>
@@ -999,7 +1026,7 @@ export function CalendarDashboardClient({
               />
             </div>
 
-            {formState.calendarScope !== "brand-campaign" ? (
+            {effectiveFormScope !== "brand-campaign" ? (
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="startsAt">Start</Label>
@@ -1061,7 +1088,7 @@ export function CalendarDashboardClient({
               </Select>
             </div>
 
-            {formState.calendarScope === "brand-campaign" ? (
+            {effectiveFormScope === "brand-campaign" ? (
               <div className="space-y-1.5">
                 <Label htmlFor="brandCampaignType">Entry Type</Label>
                 <Select
@@ -1095,7 +1122,7 @@ export function CalendarDashboardClient({
               </div>
             )}
 
-            {formState.calendarScope === "personal" ? (
+            {!staffMode && effectiveFormScope === "personal" ? (
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="owner">Personal Calendar Owner</Label>
@@ -1141,7 +1168,7 @@ export function CalendarDashboardClient({
               </>
             ) : null}
 
-            {formState.calendarScope !== "personal" && formState.calendarScope !== "brand-campaign" ? (
+            {effectiveFormScope !== "personal" && effectiveFormScope !== "brand-campaign" ? (
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="location">Location</Label>
@@ -1173,7 +1200,7 @@ export function CalendarDashboardClient({
               </>
             ) : null}
 
-            {formState.calendarScope === "brand-campaign" ? (
+            {effectiveFormScope === "brand-campaign" ? (
               <div className="space-y-1.5 md:col-span-2">
                 <Label htmlFor="location">Campaign / Brand Context</Label>
                 <Input
