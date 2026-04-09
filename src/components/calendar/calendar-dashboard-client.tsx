@@ -182,6 +182,20 @@ function resolveTextColorForHex(hex: string, fallback: string) {
   return brightness >= 150 ? "#0f172a" : "#ffffff";
 }
 
+function normalizeColorInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const candidate = trimmed.startsWith("#") ? trimmed : `#${trimmed}`;
+  if (!/^#[0-9a-fA-F]{6}$/.test(candidate)) {
+    return trimmed.toUpperCase();
+  }
+
+  return candidate.toUpperCase();
+}
+
 function getStatusLabel(status: MeetingStatus) {
   return statusLabelMap[status] ?? status;
 }
@@ -735,11 +749,12 @@ export function CalendarDashboardClient({
 
     const dedupedAttendees = uniqueEmails(attendeeEmails);
 
+    const normalizedCustomColor = normalizeColorInput(formState.customColor);
     const payload = {
       title: formState.title,
       description: formState.description,
       imageUrl: formState.imageUrl,
-      customColor: formState.customColor || null,
+      customColor: /^#[0-9A-F]{6}$/.test(normalizedCustomColor) ? normalizedCustomColor : null,
       location: formState.location,
       meetingLink: formState.meetingLink,
       internalNotes: formState.internalNotes,
@@ -957,12 +972,20 @@ export function CalendarDashboardClient({
               editable
               selectable
               dayMaxEvents
+              eventDisplay="block"
               eventDrop={handleEventDrop}
               eventResize={handleEventResize}
               dateClick={handleDateClick}
               eventClick={handleEventClick}
               eventContent={renderCalendarEventContent}
               eventDidMount={(eventInfo) => {
+                if (eventInfo.event.display !== "background") {
+                  const backgroundColor = eventInfo.event.backgroundColor || eventInfo.event.borderColor;
+                  if (backgroundColor) {
+                    eventInfo.el.style.setProperty("background-color", backgroundColor, "important");
+                    eventInfo.el.style.setProperty("border-color", backgroundColor, "important");
+                  }
+                }
                 eventInfo.el.title = eventInfo.event.title;
               }}
               events={calendarEvents}
