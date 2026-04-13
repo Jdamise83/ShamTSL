@@ -119,6 +119,9 @@ const personalDirectory: Record<
 const alignedPersonalColor = "#7c3aed";
 const brandColor = "#bfdbfe";
 const campaignColor = "#bbf7d0";
+const memePagesColor = "#FDE68A";
+const tslUkColor = "#93C5FD";
+const tslUsColor = "#F9A8D4";
 const taskColor = "#facc15";
 const defaultEventColor = "#fca5a5";
 const eventColorPresets = [
@@ -333,6 +336,10 @@ function getViewTitle(scope: CalendarScope) {
     return "Personal Calendar";
   }
 
+  if (scope === "campaigns") {
+    return "Campaigns Calendar";
+  }
+
   if (scope === "brand-campaign") {
     return "Brand & Campaign Calendar";
   }
@@ -343,6 +350,10 @@ function getViewTitle(scope: CalendarScope) {
 function getCreateButtonLabel(scope: CalendarScope) {
   if (scope === "personal") {
     return "Create Personal Entry";
+  }
+
+  if (scope === "campaigns") {
+    return "Create Campaign Entry";
   }
 
   if (scope === "brand-campaign") {
@@ -375,10 +386,10 @@ function blankEventForm(dateValue: Date | undefined, scope: CalendarScope, owner
     meetingLink: "",
     internalNotes: "",
     status: "planned",
-    eventType: scope === "brand-campaign" ? "event" : "meeting",
+    eventType: scope === "brand-campaign" || scope === "campaigns" ? "event" : "meeting",
     calendarScope: scope,
     personalOwner: owner === "all" ? "dylan" : owner,
-    brandCampaignType: "campaign",
+    brandCampaignType: scope === "campaigns" ? "meme-pages" : "campaign",
     startsAt: toLocalInputValue(start.toISOString()),
     endsAt: toLocalInputValue(end.toISOString()),
     startDate: toLocalDateValue(start.toISOString()),
@@ -408,7 +419,9 @@ function mapEventToForm(event: CalendarEvent): EventFormState {
     eventType: event.eventType,
     calendarScope: event.calendarScope,
     personalOwner: event.personalOwner ?? "dylan",
-    brandCampaignType: event.brandCampaignType ?? "campaign",
+    brandCampaignType:
+      event.brandCampaignType ??
+      (event.calendarScope === "campaigns" ? "meme-pages" : "campaign"),
     startsAt: toLocalInputValue(event.startsAt),
     endsAt: toLocalInputValue(event.endsAt),
     startDate: toLocalDateValue(event.startsAt),
@@ -425,7 +438,7 @@ function applyFallbackEnd(start: Date, end: Date | null, scope: CalendarScope) {
   }
 
   const fallback = new Date(start);
-  if (scope === "brand-campaign") {
+  if (scope === "brand-campaign" || scope === "campaigns") {
     fallback.setDate(fallback.getDate() + 1);
   } else {
     fallback.setHours(fallback.getHours() + 1);
@@ -505,6 +518,10 @@ export function CalendarDashboardClient({
             return event.calendarScope === "brand-campaign";
           }
 
+          if (activeView === "campaigns") {
+            return event.calendarScope === "campaigns";
+          }
+
           return event.calendarScope === "main" || event.calendarScope === "personal";
         }),
     [events, selectedStatuses, activeView, personalOwnerFilter, normalizedStaffEmail, staffMode]
@@ -526,6 +543,12 @@ export function CalendarDashboardClient({
             ? event.brandCampaignType === "brand"
               ? brandColor
               : campaignColor
+            : event.calendarScope === "campaigns"
+              ? event.brandCampaignType === "meme-pages"
+                ? memePagesColor
+                : event.brandCampaignType === "tsl-us"
+                  ? tslUsColor
+                  : tslUkColor
             : event.calendarScope === "personal"
               ? personalColor
               : event.eventType === "task"
@@ -711,12 +734,12 @@ export function CalendarDashboardClient({
     }
 
     const calendarScope = effectiveFormScope;
-    const eventType = calendarScope === "brand-campaign" ? "event" : formState.eventType;
+    const eventType = calendarScope === "brand-campaign" || calendarScope === "campaigns" ? "event" : formState.eventType;
 
     let startsAt = formState.startsAt;
     let endsAt = formState.endsAt;
 
-    if (calendarScope === "brand-campaign") {
+    if (calendarScope === "brand-campaign" || calendarScope === "campaigns") {
       if (!formState.startDate) {
         setError("Start date is required for brand/campaign entries.");
         return;
@@ -760,10 +783,10 @@ export function CalendarDashboardClient({
       internalNotes: formState.internalNotes,
       status: formState.status,
       eventType,
-      allDay: calendarScope === "brand-campaign",
+      allDay: calendarScope === "brand-campaign" || calendarScope === "campaigns",
       calendarScope,
       personalOwner: calendarScope === "personal" ? formState.personalOwner : null,
-      brandCampaignType: calendarScope === "brand-campaign" ? formState.brandCampaignType : null,
+      brandCampaignType: calendarScope === "brand-campaign" || calendarScope === "campaigns" ? formState.brandCampaignType : null,
       notifyBoth: calendarScope === "personal" ? formState.notifyBoth : false,
       startsAt: fromLocalInputValue(startsAt),
       endsAt: fromLocalInputValue(endsAt),
@@ -904,6 +927,8 @@ export function CalendarDashboardClient({
     ? "Private calendar for your account only. Other staff and main calendar entries are hidden."
     : activeView === "personal"
       ? "Separate Dylan and John calendars with shared scheduling + alignment controls."
+      : activeView === "campaigns"
+        ? "Overlapping multi-day planning for MEME Pages, TSL UK, and TSL US."
       : activeView === "brand-campaign"
         ? "Light blue blocks for brand activity and light green blocks for campaigns across selected days."
         : "Main operational calendar with personal entries mirrored in-line for alignment.";
@@ -963,7 +988,7 @@ export function CalendarDashboardClient({
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
               locale={enGbLocale}
-              initialView={activeView === "brand-campaign" ? "dayGridMonth" : "timeGridWeek"}
+              initialView={activeView === "brand-campaign" || activeView === "campaigns" ? "dayGridMonth" : "timeGridWeek"}
               headerToolbar={{
                 left: "prev,next today",
                 center: "title",
@@ -1030,6 +1055,12 @@ export function CalendarDashboardClient({
                         ? entry.brandCampaignType === "brand"
                           ? "Brand activity"
                           : "Campaign window"
+                        : entry.calendarScope === "campaigns"
+                          ? entry.brandCampaignType === "meme-pages"
+                            ? "MEME Pages"
+                            : entry.brandCampaignType === "tsl-us"
+                              ? "TSL US"
+                              : "TSL UK"
                         : "No location")}
                   </p>
                 </div>
@@ -1056,6 +1087,8 @@ export function CalendarDashboardClient({
             <DialogDescription>
               {effectiveFormScope === "brand-campaign"
                 ? "Schedule brand or campaign blocks that span one or many days."
+                : effectiveFormScope === "campaigns"
+                  ? "Schedule campaigns blocks that span one or many days."
                 : effectiveFormScope === "personal"
                   ? "Personal scheduling for Dylan and John, with optional shared attendance."
                   : "Main operations scheduling with attendees, links, and notes."}
@@ -1123,7 +1156,7 @@ export function CalendarDashboardClient({
               </div>
             </div>
 
-            {effectiveFormScope !== "brand-campaign" ? (
+            {effectiveFormScope !== "brand-campaign" && effectiveFormScope !== "campaigns" ? (
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="startsAt">Start</Label>
@@ -1201,6 +1234,23 @@ export function CalendarDashboardClient({
                   </SelectContent>
                 </Select>
               </div>
+            ) : effectiveFormScope === "campaigns" ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="brandCampaignType">Campaign Type</Label>
+                <Select
+                  value={formState.brandCampaignType}
+                  onValueChange={(value) => updateField("brandCampaignType", value)}
+                >
+                  <SelectTrigger id="brandCampaignType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="meme-pages">MEME Pages</SelectItem>
+                    <SelectItem value="tsl-uk">TSL UK</SelectItem>
+                    <SelectItem value="tsl-us">TSL US</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             ) : (
               <div className="space-y-1.5">
                 <Label htmlFor="eventType">Entry Type</Label>
@@ -1265,7 +1315,7 @@ export function CalendarDashboardClient({
               </>
             ) : null}
 
-            {effectiveFormScope !== "personal" && effectiveFormScope !== "brand-campaign" ? (
+            {effectiveFormScope !== "personal" && effectiveFormScope !== "brand-campaign" && effectiveFormScope !== "campaigns" ? (
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="location">Location</Label>
@@ -1305,6 +1355,18 @@ export function CalendarDashboardClient({
                   value={formState.location}
                   onChange={(event) => updateField("location", event.target.value)}
                   placeholder="Website banner, launch page, PDP refresh, etc."
+                />
+              </div>
+            ) : null}
+
+            {effectiveFormScope === "campaigns" ? (
+              <div className="space-y-1.5 md:col-span-2">
+                <Label htmlFor="location">Campaign Calendar Context</Label>
+                <Input
+                  id="location"
+                  value={formState.location}
+                  onChange={(event) => updateField("location", event.target.value)}
+                  placeholder="Audience, objective, offer, landing page, etc."
                 />
               </div>
             ) : null}

@@ -22,6 +22,7 @@ const adminNavigation = [
   { href: "/calendar", label: "Main Calendar", icon: Calendar },
   { href: "/calendar/personal", label: "Personal Calendar", icon: Users },
   { href: "/calendar/brand-campaign", label: "Brand Calendar", icon: LayoutGrid },
+  { href: "/calendar/campaigns", label: "Campaigns Calendar", icon: LayoutGrid },
   { href: "/shopify", label: "Shopify", icon: ShoppingBag },
   { href: "/unleashed", label: "Unleashed", icon: Factory },
   { href: "/google-ads", label: "Google Ads", icon: Megaphone },
@@ -36,20 +37,9 @@ const staffNavigation = [
   { href: "/holidays", label: "Holidays", icon: Umbrella }
 ];
 
-const unleashedStaffNavigation = [
-  { href: "/calendar", label: "Personal Calendar", icon: Calendar },
-  { href: "/unleashed", label: "Unleashed", icon: Factory },
-  { href: "/holidays", label: "Holidays", icon: Umbrella }
-];
-
 export function SidebarNav({ accessLevel = "full" }: { accessLevel?: DashboardAccessLevel }) {
   const pathname = usePathname();
-  const navigation =
-    accessLevel === "full"
-      ? adminNavigation
-      : accessLevel === "staff-unleashed"
-        ? unleashedStaffNavigation
-        : staffNavigation;
+  const navigation = accessLevel === "full" ? adminNavigation : staffNavigation;
 
   return (
     <aside className="sticky top-0 hidden h-screen w-72 border-r border-white/25 bg-[#0396FF] px-5 py-8 text-white lg:block">

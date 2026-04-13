@@ -1,8 +1,8 @@
 export type MeetingStatus = "planned" | "confirmed" | "done" | "cancelled";
 export type CalendarItemType = "meeting" | "event" | "task";
-export type CalendarScope = "main" | "personal" | "brand-campaign";
+export type CalendarScope = "main" | "personal" | "brand-campaign" | "campaigns";
 export type PersonalCalendarOwner = "dylan" | "john";
-export type BrandCampaignType = "brand" | "campaign";
+export type BrandCampaignType = "brand" | "campaign" | "meme-pages" | "tsl-uk" | "tsl-us";
 
 export interface CalendarAttendee {
   id: string;

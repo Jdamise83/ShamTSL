@@ -16,9 +16,9 @@ import type {
 
 let inMemoryCalendarEvents: CalendarEvent[] = structuredClone(seededCalendarEvents);
 const metadataPrefix = "[[TSL_META]]";
-const calendarScopes: CalendarScope[] = ["main", "personal", "brand-campaign"];
+const calendarScopes: CalendarScope[] = ["main", "personal", "brand-campaign", "campaigns"];
 const personalOwners: PersonalCalendarOwner[] = ["dylan", "john"];
-const brandCampaignTypes: BrandCampaignType[] = ["brand", "campaign"];
+const brandCampaignTypes: BrandCampaignType[] = ["brand", "campaign", "meme-pages", "tsl-uk", "tsl-us"];
 
 type CalendarAccessContext = {
   role: "admin" | "staff";
@@ -55,6 +55,25 @@ function isBrandCampaignType(value: unknown): value is BrandCampaignType {
   return typeof value === "string" && brandCampaignTypes.includes(value as BrandCampaignType);
 }
 
+function normalizeBrandCalendarType(value: unknown): BrandCampaignType | null {
+  if (isBrandCampaignType(value)) {
+    return value;
+  }
+  return null;
+}
+
+function inferScopeFromBrandType(type: BrandCampaignType | null) {
+  if (!type) {
+    return null;
+  }
+
+  if (type === "brand" || type === "campaign") {
+    return "brand-campaign" as CalendarScope;
+  }
+
+  return "campaigns" as CalendarScope;
+}
+
 function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined) {
   const fallback = {
     eventType: "meeting" as CalendarItemType,
@@ -89,18 +108,18 @@ function parseInternalNotesMetadata(rawInternalNotes: string | null | undefined)
       ownerEmail?: string | null;
       calendarScope?: CalendarScope;
       personalOwner?: PersonalCalendarOwner | null;
-      brandCampaignType?: BrandCampaignType | null;
+      brandCampaignType?: BrandCampaignType | "brand" | "campaign" | null;
       notifyBoth?: boolean;
     };
     const eventType: CalendarItemType =
       parsed.eventType === "event" || parsed.eventType === "task" ? parsed.eventType : "meeting";
     const personalOwner = isPersonalOwner(parsed.personalOwner) ? parsed.personalOwner : null;
-    const brandCampaignType = isBrandCampaignType(parsed.brandCampaignType) ? parsed.brandCampaignType : null;
-    const inferredScope: CalendarScope = brandCampaignType
-      ? "brand-campaign"
-      : personalOwner
+    const brandCampaignType = normalizeBrandCalendarType(parsed.brandCampaignType);
+    const inferredScope: CalendarScope =
+      inferScopeFromBrandType(brandCampaignType) ??
+      (personalOwner
         ? "personal"
-        : "main";
+        : "main");
     const calendarScope = isCalendarScope(parsed.calendarScope) ? parsed.calendarScope : inferredScope;
     const imageUrl = typeof parsed.imageUrl === "string" && parsed.imageUrl.trim() ? parsed.imageUrl.trim() : null;
     const customColor = normalizeHexColor(parsed.customColor);
@@ -398,7 +417,10 @@ export const calendarService = {
   async createEvent(input: CalendarEventInput, actorId: string) {
     const admin = createSupabaseAdminClient();
     const eventType = input.eventType ?? "meeting";
-    const allDay = input.allDay === true || input.calendarScope === "brand-campaign";
+    const allDay =
+      input.allDay === true ||
+      input.calendarScope === "brand-campaign" ||
+      input.calendarScope === "campaigns";
     const calendarScope = input.calendarScope ?? "main";
     const ownerEmail =
       calendarScope === "personal" && input.ownerEmail
@@ -510,7 +532,10 @@ export const calendarService = {
   async updateEvent(eventId: string, input: CalendarEventInput) {
     const admin = createSupabaseAdminClient();
     const eventType = input.eventType ?? "meeting";
-    const allDay = input.allDay === true || input.calendarScope === "brand-campaign";
+    const allDay =
+      input.allDay === true ||
+      input.calendarScope === "brand-campaign" ||
+      input.calendarScope === "campaigns";
     const calendarScope = input.calendarScope ?? "main";
     const ownerEmail =
       calendarScope === "personal" && input.ownerEmail

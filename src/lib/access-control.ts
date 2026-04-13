@@ -1,11 +1,9 @@
-export type DashboardAccessLevel = "full" | "staff" | "staff-unleashed";
+export type DashboardAccessLevel = "full" | "staff";
 export type DashboardRole = "admin" | "staff";
 
 const fullAccessLocalParts = new Set(["shampt19", "dylan", "john"]);
-const unleashedAccessLocalParts = new Set(["reece"]);
 
 const staffAllowedPages = new Set(["/calendar", "/holidays"]);
-const staffUnleashedAllowedPages = new Set(["/calendar", "/holidays", "/unleashed"]);
 const allowedApiPrefixes = ["/api/calendar/events", "/api/holidays"];
 
 function normalizeEmail(email: string | null | undefined) {
@@ -21,10 +19,6 @@ export function resolveDashboardAccessLevel(email: string | null | undefined): D
 
   if (fullAccessLocalParts.has(localPart)) {
     return "full";
-  }
-
-  if (unleashedAccessLocalParts.has(localPart)) {
-    return "staff-unleashed";
   }
 
   return "staff";
@@ -55,10 +49,6 @@ export function isAllowedDashboardPath(pathname: string, accessLevel: DashboardA
 
   if (normalizedPath.startsWith("/api/")) {
     return matchesApiPrefix(normalizedPath);
-  }
-
-  if (accessLevel === "staff-unleashed") {
-    return staffUnleashedAllowedPages.has(normalizedPath);
   }
 
   return staffAllowedPages.has(normalizedPath);

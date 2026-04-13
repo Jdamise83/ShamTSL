@@ -10,6 +10,7 @@ const adminLinks = [
   { href: "/calendar", label: "Main Cal" },
   { href: "/calendar/personal", label: "Personal Cal" },
   { href: "/calendar/brand-campaign", label: "Brand Cal" },
+  { href: "/calendar/campaigns", label: "Campaigns" },
   { href: "/shopify", label: "Shopify" },
   { href: "/unleashed", label: "Unleashed" },
   { href: "/google-ads", label: "Ads" },
@@ -24,16 +25,9 @@ const staffLinks = [
   { href: "/holidays", label: "Holidays" }
 ];
 
-const unleashedStaffLinks = [
-  { href: "/calendar", label: "Personal" },
-  { href: "/unleashed", label: "Unleashed" },
-  { href: "/holidays", label: "Holidays" }
-];
-
 export function MobileNav({ accessLevel = "full" }: { accessLevel?: DashboardAccessLevel }) {
   const pathname = usePathname();
-  const links =
-    accessLevel === "full" ? adminLinks : accessLevel === "staff-unleashed" ? unleashedStaffLinks : staffLinks;
+  const links = accessLevel === "full" ? adminLinks : staffLinks;
 
   return (
     <div className="overflow-x-auto border-b border-border bg-card px-4 py-3 lg:hidden">
