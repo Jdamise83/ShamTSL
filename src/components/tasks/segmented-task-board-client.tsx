@@ -75,7 +75,18 @@ const priorityOptions: Array<{ value: SegmentedTaskPriority; label: string }> = 
   { value: "critical", label: "Critical" }
 ];
 
-const segmentColorOptions = ["#DBEAFE", "#DCFCE7", "#FCE7F3", "#FEF3C7", "#E0E7FF", "#FEE2E2"];
+const taskColorOptions = [
+  { name: "Sky Blue", value: "#DBEAFE" },
+  { name: "Mint Green", value: "#DCFCE7" },
+  { name: "Soft Pink", value: "#FCE7F3" },
+  { name: "Sun Yellow", value: "#FEF3C7" },
+  { name: "Lavender", value: "#E0E7FF" },
+  { name: "Coral", value: "#FEE2E2" },
+  { name: "Teal", value: "#CCFBF1" },
+  { name: "Orange", value: "#FFEDD5" },
+  { name: "Slate", value: "#E2E8F0" },
+  { name: "Lilac", value: "#EDE9FE" }
+];
 
 function taskKey(segmentId: string, taskId: string) {
   return `${segmentId}::${taskId}`;
@@ -171,14 +182,14 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error ?? "Segmented task action failed.");
+        throw new Error(payload?.error ?? "Task board action failed.");
       }
 
       const payload = (await response.json()) as { board: SegmentedTaskBoard };
       setBoard(payload.board);
       return payload.board;
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Segmented task action failed.");
+      setError(actionError instanceof Error ? actionError.message : "Task board action failed.");
       return null;
     } finally {
       setLoading(false);
@@ -257,7 +268,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
   async function createSegment() {
     const title = segmentTitleInput.trim();
     if (!title) {
-      setError("Segment title is required.");
+      setError("Task title is required.");
       return;
     }
 
@@ -406,28 +417,28 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Card className="border-border/80 bg-card">
           <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Segments</p>
+            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Main Tasks</p>
             <p className="mt-2 text-3xl font-semibold text-foreground">{board.segments.length}</p>
           </CardContent>
         </Card>
         <Card className="border-border/80 bg-card">
           <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Parent Tasks</p>
+            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Tasks To Do</p>
             <p className="mt-2 text-3xl font-semibold text-foreground">{taskCount}</p>
           </CardContent>
         </Card>
         <Card className="border-border/80 bg-card">
           <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Subtasks</p>
+            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">To-do Items</p>
             <p className="mt-2 text-3xl font-semibold text-foreground">{subtaskCount}</p>
           </CardContent>
         </Card>
       </div>
 
-      <CalendarShell title="Create Segment" subtitle="Add a grouped work lane like Monday boards.">
+      <CalendarShell title="Create Task" subtitle="Add a main task lane like Monday boards.">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_170px_auto]">
           <div className="space-y-1.5">
-            <Label htmlFor="segment-title">Segment title</Label>
+            <Label htmlFor="segment-title">Task title</Label>
             <Input
               id="segment-title"
               value={segmentTitleInput}
@@ -436,18 +447,27 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="segment-color">Color</Label>
-            <Input
-              id="segment-color"
-              type="color"
+            <Label htmlFor="segment-color">Task Colour</Label>
+            <Select
               value={segmentColorInput}
-              onChange={(event) => setSegmentColorInput(event.target.value.toUpperCase())}
-            />
+              onValueChange={(value) => setSegmentColorInput(value)}
+            >
+              <SelectTrigger id="segment-color">
+                <SelectValue placeholder="Choose colour" />
+              </SelectTrigger>
+              <SelectContent>
+                {taskColorOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex items-end">
             <Button onClick={createSegment} disabled={loading} className="w-full md:w-auto">
               <Plus className="mr-2 h-4 w-4" />
-              Add Segment
+              Add Task
             </Button>
           </div>
         </div>
@@ -466,7 +486,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
               <CardHeader className="border-b border-border/60 bg-muted/25 pb-4">
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.6fr_170px_auto]">
                   <div className="space-y-1.5">
-                    <Label>Segment Name</Label>
+                    <Label>Task Name</Label>
                     <Input
                       value={edit.title}
                       onChange={(event) =>
@@ -478,7 +498,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label>Segment Color</Label>
+                    <Label>Task Colour</Label>
                     <Select
                       value={edit.color}
                       onValueChange={(value) =>
@@ -492,9 +512,9 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {segmentColorOptions.map((optionColor) => (
-                          <SelectItem key={optionColor} value={optionColor}>
-                            {optionColor}
+                        {taskColorOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -507,12 +527,12 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                       disabled={loading}
                     >
                       <Save className="mr-2 h-4 w-4" />
-                      Save Segment
+                      Save Task
                     </Button>
                   </div>
                 </div>
                 <CardTitle className="mt-3 text-base uppercase tracking-[0.08em]">
-                  {segment.tasks.length} Parent Tasks
+                  {segment.tasks.length} Tasks To Do
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4 p-0">
@@ -674,7 +694,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                                   <TableCell colSpan={8} className="bg-muted/20">
                                     <div className="space-y-3 p-2">
                                       <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                        Subtasks
+                                        To-do Items
                                       </p>
                                       {task.subtasks.length ? (
                                         <div className="space-y-2">
@@ -776,7 +796,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                                           })}
                                         </div>
                                       ) : (
-                                        <p className="text-sm text-muted-foreground">No subtasks yet.</p>
+                                        <p className="text-sm text-muted-foreground">No to-do items yet.</p>
                                       )}
 
                                       <div className="grid grid-cols-1 gap-2 rounded-xl border border-dashed border-border/80 bg-background/80 p-2 md:grid-cols-[1.7fr_150px_170px_auto]">
@@ -832,7 +852,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                                           disabled={loading}
                                         >
                                           <Plus className="mr-2 h-4 w-4" />
-                                          Add Subtask
+                                          Add To-do
                                         </Button>
                                       </div>
                                     </div>
@@ -845,7 +865,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                       ) : (
                         <TableRow>
                           <TableCell colSpan={8}>
-                            <EmptyState message="No parent tasks in this segment yet." />
+                            <EmptyState message="No tasks to do inside this main task yet." />
                           </TableCell>
                         </TableRow>
                       )}
@@ -915,7 +935,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                             />
                             <Button variant="secondary" onClick={() => createTask(segment.id)} disabled={loading}>
                               <Plus className="mr-2 h-4 w-4" />
-                              Add Task
+                              Add Task To Do
                             </Button>
                           </div>
                         </TableCell>
@@ -928,8 +948,8 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
           );
         })
       ) : (
-        <CalendarShell title="Segmented Task List">
-          <EmptyState message="No segments yet. Create your first segment above." />
+        <CalendarShell title="Task List">
+          <EmptyState message="No main tasks yet. Create your first task above." />
         </CalendarShell>
       )}
     </div>
