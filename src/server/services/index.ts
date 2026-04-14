@@ -6,3 +6,4 @@ export { ga4Service } from "@/server/services/ga4-service";
 export { shopifyService } from "@/server/services/shopify-service";
 export { unleashedService } from "@/server/services/unleashed-service";
 export { homeService } from "@/server/services/home-service";
+export { segmentedTaskListService } from "@/server/services/segmented-task-list-service";

@@ -11,6 +11,7 @@ const adminLinks = [
   { href: "/calendar/personal", label: "Personal Cal" },
   { href: "/calendar/brand-campaign", label: "Brand Cal" },
   { href: "/calendar/campaigns", label: "Campaigns" },
+  { href: "/segmented-task-list", label: "Task List" },
   { href: "/shopify", label: "Shopify" },
   { href: "/unleashed", label: "Unleashed" },
   { href: "/google-ads", label: "Ads" },
