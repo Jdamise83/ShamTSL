@@ -1,11 +1,10 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Plus, Save, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { GripVertical, Plus, Trash2 } from "lucide-react";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
 import { EmptyState } from "@/components/dashboard/empty-state";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -17,21 +16,10 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import type {
-  SegmentedSubtask,
   SegmentedTask,
   SegmentedTaskBoard,
   SegmentedTaskOwner,
-  SegmentedTaskPriority,
   SegmentedTaskStatus
 } from "@/types/segmented-task-list";
 
@@ -39,43 +27,21 @@ interface SegmentedTaskBoardClientProps {
   initialBoard: SegmentedTaskBoard;
 }
 
-interface TaskDraft {
+interface TaskCreateDraft {
   title: string;
   owner: SegmentedTaskOwner;
-  status: SegmentedTaskStatus;
-  priority: SegmentedTaskPriority;
-  dueDate: string;
-  notes: string;
 }
 
-interface SubtaskDraft {
-  title: string;
-  owner: SegmentedTaskOwner;
-  status: SegmentedTaskStatus;
-}
+type BoardStatus = "not-started" | "in-progress" | "done";
 
-const ownerOptions: Array<{ value: SegmentedTaskOwner; label: string }> = [
-  { value: "dylan", label: "Dylan" },
-  { value: "john", label: "John" },
-  { value: "shampt19", label: "Shampt19" },
-  { value: "unassigned", label: "Unassigned" }
+const ownerOptions: Array<{ value: SegmentedTaskOwner; label: string; color: string }> = [
+  { value: "shampt19", label: "Shampt19", color: "#7C3AED" },
+  { value: "john", label: "John", color: "#0EA5A3" },
+  { value: "dylan", label: "Dylan", color: "#2F74FF" },
+  { value: "unassigned", label: "Unassigned", color: "#64748B" }
 ];
 
-const statusOptions: Array<{ value: SegmentedTaskStatus; label: string; tone: "default" | "success" | "muted" | "danger" }> = [
-  { value: "not-started", label: "Not Started", tone: "default" },
-  { value: "in-progress", label: "In Progress", tone: "muted" },
-  { value: "blocked", label: "Blocked", tone: "danger" },
-  { value: "done", label: "Done", tone: "success" }
-];
-
-const priorityOptions: Array<{ value: SegmentedTaskPriority; label: string }> = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "critical", label: "Critical" }
-];
-
-const taskColorOptions = [
+const flatColorOptions = [
   { name: "Sky Blue", value: "#DBEAFE" },
   { name: "Mint Green", value: "#DCFCE7" },
   { name: "Soft Pink", value: "#FCE7F3" },
@@ -88,54 +54,31 @@ const taskColorOptions = [
   { name: "Lilac", value: "#EDE9FE" }
 ];
 
-function taskKey(segmentId: string, taskId: string) {
-  return `${segmentId}::${taskId}`;
+const columns: Array<{ key: BoardStatus; label: string }> = [
+  { key: "not-started", label: "To Do" },
+  { key: "in-progress", label: "Initiated" },
+  { key: "done", label: "Completed" }
+];
+
+function normalizeStatus(status: SegmentedTaskStatus): BoardStatus {
+  if (status === "blocked") {
+    return "in-progress";
+  }
+  if (status === "done") {
+    return "done";
+  }
+  if (status === "in-progress") {
+    return "in-progress";
+  }
+  return "not-started";
 }
 
-function subtaskKey(segmentId: string, taskId: string, subtaskId: string) {
-  return `${segmentId}::${taskId}::${subtaskId}`;
+function ownerMeta(owner: SegmentedTaskOwner) {
+  return ownerOptions.find((option) => option.value === owner) ?? ownerOptions[3];
 }
 
-function getToneForStatus(status: SegmentedTaskStatus) {
-  return statusOptions.find((option) => option.value === status)?.tone ?? "default";
-}
-
-function draftFromTask(task: SegmentedTask): TaskDraft {
-  return {
-    title: task.title,
-    owner: task.owner,
-    status: task.status,
-    priority: task.priority,
-    dueDate: task.dueDate ?? "",
-    notes: task.notes ?? ""
-  };
-}
-
-function draftFromSubtask(subtask: SegmentedSubtask): SubtaskDraft {
-  return {
-    title: subtask.title,
-    owner: subtask.owner,
-    status: subtask.status
-  };
-}
-
-function createBlankTaskDraft(): TaskDraft {
-  return {
-    title: "",
-    owner: "unassigned",
-    status: "not-started",
-    priority: "medium",
-    dueDate: "",
-    notes: ""
-  };
-}
-
-function createBlankSubtaskDraft(): SubtaskDraft {
-  return {
-    title: "",
-    owner: "unassigned",
-    status: "not-started"
-  };
+function getInitialDraftForSegment(segmentId: string, drafts: Record<string, TaskCreateDraft>) {
+  return drafts[segmentId] ?? { title: "", owner: "unassigned" };
 }
 
 export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardClientProps) {
@@ -143,27 +86,14 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [segmentTitleInput, setSegmentTitleInput] = useState("");
-  const [segmentColorInput, setSegmentColorInput] = useState("#DBEAFE");
-  const [segmentEdits, setSegmentEdits] = useState<Record<string, { title: string; color: string }>>({});
+  const [taskTitleInput, setTaskTitleInput] = useState("");
+  const [taskColorInput, setTaskColorInput] = useState(flatColorOptions[0].value);
+  const [taskDraftsByGroup, setTaskDraftsByGroup] = useState<Record<string, TaskCreateDraft>>({});
 
-  const [taskDrafts, setTaskDrafts] = useState<Record<string, TaskDraft>>({});
-  const [newTaskDrafts, setNewTaskDrafts] = useState<Record<string, TaskDraft>>({});
-
-  const [subtaskDrafts, setSubtaskDrafts] = useState<Record<string, SubtaskDraft>>({});
-  const [newSubtaskDrafts, setNewSubtaskDrafts] = useState<Record<string, SubtaskDraft>>({});
-  const [expandedTaskRows, setExpandedTaskRows] = useState<Record<string, boolean>>({});
+  const [draggingTask, setDraggingTask] = useState<{ segmentId: string; taskId: string } | null>(null);
 
   const taskCount = useMemo(
     () => board.segments.reduce((total, segment) => total + segment.tasks.length, 0),
-    [board]
-  );
-  const subtaskCount = useMemo(
-    () =>
-      board.segments.reduce(
-        (total, segment) => total + segment.tasks.reduce((sum, task) => sum + task.subtasks.length, 0),
-        0
-      ),
     [board]
   );
 
@@ -174,9 +104,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
     try {
       const response = await fetch("/api/segmented-task-list", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
 
@@ -196,135 +124,76 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
     }
   }
 
-  function getSegmentEdit(segmentId: string, title: string, color: string) {
-    return segmentEdits[segmentId] ?? { title, color };
-  }
-
-  function getTaskDraft(segmentId: string, task: SegmentedTask) {
-    return taskDrafts[taskKey(segmentId, task.id)] ?? draftFromTask(task);
-  }
-
-  function getNewTaskDraft(segmentId: string) {
-    return newTaskDrafts[segmentId] ?? createBlankTaskDraft();
-  }
-
-  function getSubtaskDraft(segmentId: string, taskId: string, subtask: SegmentedSubtask) {
-    return subtaskDrafts[subtaskKey(segmentId, taskId, subtask.id)] ?? draftFromSubtask(subtask);
-  }
-
-  function getNewSubtaskDraft(segmentId: string, taskId: string) {
-    return newSubtaskDrafts[taskKey(segmentId, taskId)] ?? createBlankSubtaskDraft();
-  }
-
-  function updateTaskDraft(
-    segmentId: string,
-    taskId: string,
-    task: SegmentedTask,
-    field: keyof TaskDraft,
-    value: string
-  ) {
-    const key = taskKey(segmentId, taskId);
-    setTaskDrafts((previous) => {
-      const base = previous[key] ?? draftFromTask(task);
-      return { ...previous, [key]: { ...base, [field]: value } };
-    });
-  }
-
-  function updateNewTaskDraft(segmentId: string, field: keyof TaskDraft, value: string) {
-    setNewTaskDrafts((previous) => {
-      const base = previous[segmentId] ?? createBlankTaskDraft();
-      return { ...previous, [segmentId]: { ...base, [field]: value } };
-    });
-  }
-
-  function updateSubtaskDraft(
-    segmentId: string,
-    taskId: string,
-    subtaskId: string,
-    subtask: SegmentedSubtask,
-    field: keyof SubtaskDraft,
-    value: string
-  ) {
-    const key = subtaskKey(segmentId, taskId, subtaskId);
-    setSubtaskDrafts((previous) => {
-      const base = previous[key] ?? draftFromSubtask(subtask);
-      return { ...previous, [key]: { ...base, [field]: value } };
-    });
-  }
-
-  function updateNewSubtaskDraft(
-    segmentId: string,
-    taskId: string,
-    field: keyof SubtaskDraft,
-    value: string
-  ) {
-    const key = taskKey(segmentId, taskId);
-    setNewSubtaskDrafts((previous) => {
-      const base = previous[key] ?? createBlankSubtaskDraft();
-      return { ...previous, [key]: { ...base, [field]: value } };
-    });
-  }
-
-  async function createSegment() {
-    const title = segmentTitleInput.trim();
+  async function createMainTask() {
+    const title = taskTitleInput.trim();
     if (!title) {
       setError("Task title is required.");
       return;
     }
 
-    const nextBoard = await postAction({
+    const next = await postAction({
       action: "create-segment",
       payload: {
         title,
-        color: segmentColorInput
+        color: taskColorInput
       }
     });
 
-    if (nextBoard) {
-      setSegmentTitleInput("");
-      setSegmentColorInput("#DBEAFE");
+    if (next) {
+      setTaskTitleInput("");
+      setTaskColorInput(flatColorOptions[0].value);
     }
   }
 
-  async function saveSegment(segmentId: string, title: string, color: string) {
-    await postAction({
-      action: "update-segment",
-      payload: {
-        segmentId,
-        title,
-        color
-      }
-    });
-  }
-
-  async function createTask(segmentId: string) {
-    const draft = getNewTaskDraft(segmentId);
+  async function createTaskItem(segmentId: string) {
+    const draft = getInitialDraftForSegment(segmentId, taskDraftsByGroup);
     if (!draft.title.trim()) {
-      setError("Task title is required.");
+      setError("Task item title is required.");
       return;
     }
 
-    const nextBoard = await postAction({
+    const next = await postAction({
       action: "create-task",
       payload: {
         segmentId,
         task: {
-          ...draft,
-          dueDate: draft.dueDate || null,
-          notes: draft.notes || null
+          title: draft.title.trim(),
+          owner: draft.owner,
+          status: "not-started",
+          priority: "medium",
+          dueDate: null,
+          notes: null
         }
       }
     });
 
-    if (nextBoard) {
-      setNewTaskDrafts((previous) => ({ ...previous, [segmentId]: createBlankTaskDraft() }));
+    if (next) {
+      setTaskDraftsByGroup((previous) => ({
+        ...previous,
+        [segmentId]: { title: "", owner: "unassigned" }
+      }));
     }
   }
 
-  async function saveTask(segmentId: string, taskId: string, task: SegmentedTask) {
-    const draft = getTaskDraft(segmentId, task);
-    if (!draft.title.trim()) {
-      setError("Task title is required.");
+  async function removeTaskItem(segmentId: string, taskId: string) {
+    await postAction({
+      action: "delete-task",
+      payload: { segmentId, taskId }
+    });
+  }
+
+  async function moveTaskItem(
+    segmentId: string,
+    taskId: string,
+    targetStatus: BoardStatus
+  ) {
+    const segment = board.segments.find((item) => item.id === segmentId);
+    const task = segment?.tasks.find((item) => item.id === taskId);
+    if (!task) {
+      return;
+    }
+
+    if (normalizeStatus(task.status) === targetStatus) {
       return;
     }
 
@@ -334,76 +203,13 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
         segmentId,
         taskId,
         task: {
-          ...draft,
-          dueDate: draft.dueDate || null,
-          notes: draft.notes || null
+          title: task.title,
+          owner: task.owner,
+          status: targetStatus,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          notes: task.notes
         }
-      }
-    });
-  }
-
-  async function removeTask(segmentId: string, taskId: string) {
-    await postAction({
-      action: "delete-task",
-      payload: {
-        segmentId,
-        taskId
-      }
-    });
-  }
-
-  async function createSubtask(segmentId: string, taskId: string) {
-    const draft = getNewSubtaskDraft(segmentId, taskId);
-    if (!draft.title.trim()) {
-      setError("Subtask title is required.");
-      return;
-    }
-
-    const nextBoard = await postAction({
-      action: "create-subtask",
-      payload: {
-        segmentId,
-        taskId,
-        subtask: draft
-      }
-    });
-
-    if (nextBoard) {
-      const key = taskKey(segmentId, taskId);
-      setNewSubtaskDrafts((previous) => ({ ...previous, [key]: createBlankSubtaskDraft() }));
-    }
-  }
-
-  async function saveSubtask(
-    segmentId: string,
-    taskId: string,
-    subtaskId: string,
-    subtask: SegmentedSubtask
-  ) {
-    const draft = getSubtaskDraft(segmentId, taskId, subtask);
-    if (!draft.title.trim()) {
-      setError("Subtask title is required.");
-      return;
-    }
-
-    await postAction({
-      action: "update-subtask",
-      payload: {
-        segmentId,
-        taskId,
-        subtaskId,
-        subtask: draft
-      }
-    });
-  }
-
-  async function removeSubtask(segmentId: string, taskId: string, subtaskId: string) {
-    await postAction({
-      action: "delete-subtask",
-      payload: {
-        segmentId,
-        taskId,
-        subtaskId
       }
     });
   }
@@ -414,7 +220,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
         <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card className="border-border/80 bg-card">
           <CardContent className="p-5">
             <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Main Tasks</p>
@@ -423,40 +229,31 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
         </Card>
         <Card className="border-border/80 bg-card">
           <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Tasks To Do</p>
+            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Total Task Items</p>
             <p className="mt-2 text-3xl font-semibold text-foreground">{taskCount}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-border/80 bg-card">
-          <CardContent className="p-5">
-            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">To-do Items</p>
-            <p className="mt-2 text-3xl font-semibold text-foreground">{subtaskCount}</p>
           </CardContent>
         </Card>
       </div>
 
-      <CalendarShell title="Create Task" subtitle="Add a main task lane like Monday boards.">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_170px_auto]">
+      <CalendarShell title="Create Main Task" subtitle="Then drag task items between To Do, Initiated, and Completed.">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_190px_auto]">
           <div className="space-y-1.5">
-            <Label htmlFor="segment-title">Task title</Label>
+            <Label htmlFor="main-task-title">Task</Label>
             <Input
-              id="segment-title"
-              value={segmentTitleInput}
-              onChange={(event) => setSegmentTitleInput(event.target.value)}
-              placeholder="Example: Paid Growth"
+              id="main-task-title"
+              value={taskTitleInput}
+              onChange={(event) => setTaskTitleInput(event.target.value)}
+              placeholder="Example: Q2 Product Launch"
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="segment-color">Task Colour</Label>
-            <Select
-              value={segmentColorInput}
-              onValueChange={(value) => setSegmentColorInput(value)}
-            >
-              <SelectTrigger id="segment-color">
+            <Label htmlFor="main-task-colour">Colour</Label>
+            <Select value={taskColorInput} onValueChange={setTaskColorInput}>
+              <SelectTrigger id="main-task-colour">
                 <SelectValue placeholder="Choose colour" />
               </SelectTrigger>
               <SelectContent>
-                {taskColorOptions.map((option) => (
+                {flatColorOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.name}
                   </SelectItem>
@@ -465,7 +262,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
             </Select>
           </div>
           <div className="flex items-end">
-            <Button onClick={createSegment} disabled={loading} className="w-full md:w-auto">
+            <Button onClick={createMainTask} disabled={loading} className="w-full md:w-auto">
               <Plus className="mr-2 h-4 w-4" />
               Add Task
             </Button>
@@ -475,7 +272,12 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
 
       {board.segments.length ? (
         board.segments.map((segment) => {
-          const edit = getSegmentEdit(segment.id, segment.title, segment.color);
+          const draft = getInitialDraftForSegment(segment.id, taskDraftsByGroup);
+          const tasksByStatus: Record<BoardStatus, SegmentedTask[]> = {
+            "not-started": segment.tasks.filter((task) => normalizeStatus(task.status) === "not-started"),
+            "in-progress": segment.tasks.filter((task) => normalizeStatus(task.status) === "in-progress"),
+            done: segment.tasks.filter((task) => normalizeStatus(task.status) === "done")
+          };
 
           return (
             <Card
@@ -484,471 +286,138 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
               style={{ borderLeft: `6px solid ${segment.color}` }}
             >
               <CardHeader className="border-b border-border/60 bg-muted/25 pb-4">
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.6fr_170px_auto]">
-                  <div className="space-y-1.5">
-                    <Label>Task Name</Label>
-                    <Input
-                      value={edit.title}
-                      onChange={(event) =>
-                        setSegmentEdits((previous) => ({
-                          ...previous,
-                          [segment.id]: { ...edit, title: event.target.value }
-                        }))
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Task Colour</Label>
-                    <Select
-                      value={edit.color}
-                      onValueChange={(value) =>
-                        setSegmentEdits((previous) => ({
-                          ...previous,
-                          [segment.id]: { ...edit, color: value }
-                        }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {taskColorOptions.map((option) => (
-                          <SelectItem key={option.value} value={option.value}>
-                            {option.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-end">
-                    <Button
-                      variant="secondary"
-                      onClick={() => saveSegment(segment.id, edit.title, edit.color)}
-                      disabled={loading}
-                    >
-                      <Save className="mr-2 h-4 w-4" />
-                      Save Task
-                    </Button>
-                  </div>
-                </div>
-                <CardTitle className="mt-3 text-base uppercase tracking-[0.08em]">
-                  {segment.tasks.length} Tasks To Do
+                <CardTitle className="text-base uppercase tracking-[0.08em]">
+                  Task: {segment.title}
                 </CardTitle>
+
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-[2fr_170px_auto]">
+                  <Input
+                    value={draft.title}
+                    onChange={(event) =>
+                      setTaskDraftsByGroup((previous) => ({
+                        ...previous,
+                        [segment.id]: { ...draft, title: event.target.value }
+                      }))
+                    }
+                    placeholder="Add task item"
+                  />
+                  <Select
+                    value={draft.owner}
+                    onValueChange={(value) =>
+                      setTaskDraftsByGroup((previous) => ({
+                        ...previous,
+                        [segment.id]: { ...draft, owner: value as SegmentedTaskOwner }
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ownerOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button variant="secondary" onClick={() => createTaskItem(segment.id)} disabled={loading}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add Item
+                  </Button>
+                </div>
               </CardHeader>
-              <CardContent className="space-y-4 p-0">
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[44px]" />
-                        <TableHead>Task</TableHead>
-                        <TableHead>Owner</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Priority</TableHead>
-                        <TableHead>Due</TableHead>
-                        <TableHead>Notes</TableHead>
-                        <TableHead className="w-[110px]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {segment.tasks.length ? (
-                        segment.tasks.map((task) => {
-                          const key = taskKey(segment.id, task.id);
-                          const draft = getTaskDraft(segment.id, task);
-                          const isExpanded = expandedTaskRows[key] === true;
 
-                          return (
-                            <Fragment key={task.id}>
-                              <TableRow key={task.id}>
-                                <TableCell>
-                                  <button
-                                    type="button"
-                                    className="rounded-md border border-border/70 bg-background p-1"
-                                    onClick={() =>
-                                      setExpandedTaskRows((previous) => ({
-                                        ...previous,
-                                        [key]: !isExpanded
-                                      }))
-                                    }
-                                  >
-                                    {isExpanded ? (
-                                      <ChevronDown className="h-4 w-4" />
-                                    ) : (
-                                      <ChevronRight className="h-4 w-4" />
-                                    )}
-                                  </button>
-                                </TableCell>
-                                <TableCell className="min-w-[220px]">
-                                  <Input
-                                    value={draft.title}
-                                    onChange={(event) =>
-                                      updateTaskDraft(segment.id, task.id, task, "title", event.target.value)
-                                    }
-                                    placeholder="Task title"
-                                  />
-                                </TableCell>
-                                <TableCell className="min-w-[150px]">
-                                  <Select
-                                    value={draft.owner}
-                                    onValueChange={(value) =>
-                                      updateTaskDraft(segment.id, task.id, task, "owner", value)
-                                    }
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {ownerOptions.map((option) => (
-                                        <SelectItem key={option.value} value={option.value}>
-                                          {option.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </TableCell>
-                                <TableCell className="min-w-[160px]">
-                                  <Select
-                                    value={draft.status}
-                                    onValueChange={(value) =>
-                                      updateTaskDraft(segment.id, task.id, task, "status", value)
-                                    }
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {statusOptions.map((option) => (
-                                        <SelectItem key={option.value} value={option.value}>
-                                          {option.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                  <Badge variant={getToneForStatus(draft.status)} className="mt-1 text-[11px]">
-                                    {statusOptions.find((option) => option.value === draft.status)?.label}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell className="min-w-[150px]">
-                                  <Select
-                                    value={draft.priority}
-                                    onValueChange={(value) =>
-                                      updateTaskDraft(segment.id, task.id, task, "priority", value)
-                                    }
-                                  >
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {priorityOptions.map((option) => (
-                                        <SelectItem key={option.value} value={option.value}>
-                                          {option.label}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </TableCell>
-                                <TableCell className="min-w-[150px]">
-                                  <Input
-                                    type="date"
-                                    value={draft.dueDate}
-                                    onChange={(event) =>
-                                      updateTaskDraft(segment.id, task.id, task, "dueDate", event.target.value)
-                                    }
-                                  />
-                                </TableCell>
-                                <TableCell className="min-w-[240px]">
-                                  <Textarea
-                                    value={draft.notes}
-                                    onChange={(event) =>
-                                      updateTaskDraft(segment.id, task.id, task, "notes", event.target.value)
-                                    }
-                                    className="min-h-[68px]"
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      size="sm"
-                                      variant="secondary"
-                                      onClick={() => saveTask(segment.id, task.id, task)}
-                                      disabled={loading}
-                                      className="h-9 w-9 p-0"
-                                    >
-                                      <Save className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="danger"
-                                      onClick={() => removeTask(segment.id, task.id)}
-                                      disabled={loading}
-                                      className="h-9 w-9 p-0"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
+              <CardContent className="p-4">
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+                  {columns.map((column) => (
+                    <div
+                      key={column.key}
+                      className="rounded-2xl border border-border/70 bg-muted/20 p-3"
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={async (event) => {
+                        event.preventDefault();
+                        let payload: { segmentId: string; taskId: string } | null = draggingTask;
+                        try {
+                          const transferred = event.dataTransfer.getData("application/json");
+                          if (transferred) {
+                            payload = JSON.parse(transferred) as { segmentId: string; taskId: string };
+                          }
+                        } catch {
+                          payload = draggingTask;
+                        }
+
+                        if (!payload || payload.segmentId !== segment.id) {
+                          return;
+                        }
+
+                        await moveTaskItem(payload.segmentId, payload.taskId, column.key);
+                        setDraggingTask(null);
+                      }}
+                    >
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                        {column.label} ({tasksByStatus[column.key].length})
+                      </p>
+
+                      <div className="space-y-2">
+                        {tasksByStatus[column.key].length ? (
+                          tasksByStatus[column.key].map((task) => {
+                            const owner = ownerMeta(task.owner);
+                            return (
+                              <div
+                                key={task.id}
+                                draggable
+                                onDragStart={(event) => {
+                                  const payload = JSON.stringify({ segmentId: segment.id, taskId: task.id });
+                                  event.dataTransfer.setData("application/json", payload);
+                                  setDraggingTask({ segmentId: segment.id, taskId: task.id });
+                                }}
+                                onDragEnd={() => setDraggingTask(null)}
+                                className="rounded-xl border border-border/70 bg-background p-3 shadow-sm"
+                                style={{ borderLeft: `5px solid ${owner.color}` }}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex min-w-0 items-start gap-2">
+                                    <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                                    <p className="text-sm font-semibold text-foreground">{task.title}</p>
                                   </div>
-                                </TableCell>
-                              </TableRow>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-8 w-8 p-0 text-danger"
+                                    onClick={() => removeTaskItem(segment.id, task.id)}
+                                    disabled={loading}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </div>
 
-                              {isExpanded ? (
-                                <TableRow>
-                                  <TableCell colSpan={8} className="bg-muted/20">
-                                    <div className="space-y-3 p-2">
-                                      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
-                                        To-do Items
-                                      </p>
-                                      {task.subtasks.length ? (
-                                        <div className="space-y-2">
-                                          {task.subtasks.map((subtask) => {
-                                            const subtaskDraft = getSubtaskDraft(segment.id, task.id, subtask);
-                                            return (
-                                              <div
-                                                key={subtask.id}
-                                                className="grid grid-cols-1 gap-2 rounded-xl border border-border/70 bg-background p-2 md:grid-cols-[1.7fr_150px_170px_auto]"
-                                              >
-                                                <Input
-                                                  value={subtaskDraft.title}
-                                                  onChange={(event) =>
-                                                    updateSubtaskDraft(
-                                                      segment.id,
-                                                      task.id,
-                                                      subtask.id,
-                                                      subtask,
-                                                      "title",
-                                                      event.target.value
-                                                    )
-                                                  }
-                                                  placeholder="Subtask title"
-                                                />
-                                                <Select
-                                                  value={subtaskDraft.owner}
-                                                  onValueChange={(value) =>
-                                                    updateSubtaskDraft(
-                                                      segment.id,
-                                                      task.id,
-                                                      subtask.id,
-                                                      subtask,
-                                                      "owner",
-                                                      value
-                                                    )
-                                                  }
-                                                >
-                                                  <SelectTrigger>
-                                                    <SelectValue />
-                                                  </SelectTrigger>
-                                                  <SelectContent>
-                                                    {ownerOptions.map((option) => (
-                                                      <SelectItem key={option.value} value={option.value}>
-                                                        {option.label}
-                                                      </SelectItem>
-                                                    ))}
-                                                  </SelectContent>
-                                                </Select>
-                                                <Select
-                                                  value={subtaskDraft.status}
-                                                  onValueChange={(value) =>
-                                                    updateSubtaskDraft(
-                                                      segment.id,
-                                                      task.id,
-                                                      subtask.id,
-                                                      subtask,
-                                                      "status",
-                                                      value
-                                                    )
-                                                  }
-                                                >
-                                                  <SelectTrigger>
-                                                    <SelectValue />
-                                                  </SelectTrigger>
-                                                  <SelectContent>
-                                                    {statusOptions.map((option) => (
-                                                      <SelectItem key={option.value} value={option.value}>
-                                                        {option.label}
-                                                      </SelectItem>
-                                                    ))}
-                                                  </SelectContent>
-                                                </Select>
-                                                <div className="flex items-center gap-2">
-                                                  <Button
-                                                    size="sm"
-                                                    variant="secondary"
-                                                    onClick={() =>
-                                                      saveSubtask(segment.id, task.id, subtask.id, subtask)
-                                                    }
-                                                    disabled={loading}
-                                                    className="h-9 w-9 p-0"
-                                                  >
-                                                    <Save className="h-4 w-4" />
-                                                  </Button>
-                                                  <Button
-                                                    size="sm"
-                                                    variant="danger"
-                                                    onClick={() =>
-                                                      removeSubtask(segment.id, task.id, subtask.id)
-                                                    }
-                                                    disabled={loading}
-                                                    className="h-9 w-9 p-0"
-                                                  >
-                                                    <Trash2 className="h-4 w-4" />
-                                                  </Button>
-                                                </div>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      ) : (
-                                        <p className="text-sm text-muted-foreground">No to-do items yet.</p>
-                                      )}
-
-                                      <div className="grid grid-cols-1 gap-2 rounded-xl border border-dashed border-border/80 bg-background/80 p-2 md:grid-cols-[1.7fr_150px_170px_auto]">
-                                        <Input
-                                          value={getNewSubtaskDraft(segment.id, task.id).title}
-                                          onChange={(event) =>
-                                            updateNewSubtaskDraft(
-                                              segment.id,
-                                              task.id,
-                                              "title",
-                                              event.target.value
-                                            )
-                                          }
-                                          placeholder="Add subtask"
-                                        />
-                                        <Select
-                                          value={getNewSubtaskDraft(segment.id, task.id).owner}
-                                          onValueChange={(value) =>
-                                            updateNewSubtaskDraft(segment.id, task.id, "owner", value)
-                                          }
-                                        >
-                                          <SelectTrigger>
-                                            <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {ownerOptions.map((option) => (
-                                              <SelectItem key={option.value} value={option.value}>
-                                                {option.label}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                        <Select
-                                          value={getNewSubtaskDraft(segment.id, task.id).status}
-                                          onValueChange={(value) =>
-                                            updateNewSubtaskDraft(segment.id, task.id, "status", value)
-                                          }
-                                        >
-                                          <SelectTrigger>
-                                            <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {statusOptions.map((option) => (
-                                              <SelectItem key={option.value} value={option.value}>
-                                                {option.label}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
-                                        <Button
-                                          variant="secondary"
-                                          onClick={() => createSubtask(segment.id, task.id)}
-                                          disabled={loading}
-                                        >
-                                          <Plus className="mr-2 h-4 w-4" />
-                                          Add To-do
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  </TableCell>
-                                </TableRow>
-                              ) : null}
-                            </Fragment>
-                          );
-                        })
-                      ) : (
-                        <TableRow>
-                          <TableCell colSpan={8}>
-                            <EmptyState message="No tasks to do inside this main task yet." />
-                          </TableCell>
-                        </TableRow>
-                      )}
-
-                      <TableRow>
-                        <TableCell colSpan={8} className="bg-muted/25">
-                          <div className="grid grid-cols-1 gap-2 rounded-xl border border-dashed border-border/80 bg-background/80 p-2 md:grid-cols-[2fr_150px_160px_150px_150px_2fr_auto]">
-                            <Input
-                              value={getNewTaskDraft(segment.id).title}
-                              onChange={(event) => updateNewTaskDraft(segment.id, "title", event.target.value)}
-                              placeholder="Add parent task"
-                            />
-                            <Select
-                              value={getNewTaskDraft(segment.id).owner}
-                              onValueChange={(value) => updateNewTaskDraft(segment.id, "owner", value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {ownerOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Select
-                              value={getNewTaskDraft(segment.id).status}
-                              onValueChange={(value) => updateNewTaskDraft(segment.id, "status", value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {statusOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Select
-                              value={getNewTaskDraft(segment.id).priority}
-                              onValueChange={(value) => updateNewTaskDraft(segment.id, "priority", value)}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {priorityOptions.map((option) => (
-                                  <SelectItem key={option.value} value={option.value}>
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <Input
-                              type="date"
-                              value={getNewTaskDraft(segment.id).dueDate}
-                              onChange={(event) => updateNewTaskDraft(segment.id, "dueDate", event.target.value)}
-                            />
-                            <Input
-                              value={getNewTaskDraft(segment.id).notes}
-                              onChange={(event) => updateNewTaskDraft(segment.id, "notes", event.target.value)}
-                              placeholder="Notes"
-                            />
-                            <Button variant="secondary" onClick={() => createTask(segment.id)} disabled={loading}>
-                              <Plus className="mr-2 h-4 w-4" />
-                              Add Task To Do
-                            </Button>
+                                <div className="mt-2 flex items-center gap-2">
+                                  <span
+                                    className="rounded-full px-2.5 py-1 text-xs font-semibold text-white"
+                                    style={{ backgroundColor: owner.color }}
+                                  >
+                                    {owner.label}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="rounded-xl border border-dashed border-border/70 bg-background/70 p-3 text-xs text-muted-foreground">
+                            Drop task items here.
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
           );
         })
       ) : (
-        <CalendarShell title="Task List">
+        <CalendarShell title="Segmented Task List">
           <EmptyState message="No main tasks yet. Create your first task above." />
         </CalendarShell>
       )}
