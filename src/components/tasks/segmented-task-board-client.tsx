@@ -97,6 +97,17 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
     [board]
   );
 
+  async function refreshBoardFromServer() {
+    const response = await fetch("/api/segmented-task-list");
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { board: SegmentedTaskBoard };
+    setBoard(payload.board);
+    return payload.board;
+  }
+
   async function postAction(body: object) {
     setLoading(true);
     setError(null);
@@ -110,7 +121,14 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error ?? "Task board action failed.");
+        const message = payload?.error ?? "Task board action failed.";
+
+        if (message.toLowerCase().includes("segment not found")) {
+          await refreshBoardFromServer();
+          throw new Error("Main task changed. Board refreshed, please add the item again.");
+        }
+
+        throw new Error(message);
       }
 
       const payload = (await response.json()) as { board: SegmentedTaskBoard };

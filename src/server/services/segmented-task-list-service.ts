@@ -14,7 +14,10 @@ import type {
 
 const integrationSecretKey = "segmented-task-list-board-v1";
 let inMemoryBoard: SegmentedTaskBoard = structuredClone(seededSegmentedTaskBoard);
-const legacySeedSegmentIds = new Set(["segment-growth", "segment-operations"]);
+const legacySeedSegments = new Map<string, string>([
+  ["segment-growth", "growth sprint"],
+  ["segment-operations", "operations"]
+]);
 
 const ownerValues: SegmentedTaskOwner[] = ["dylan", "john", "shampt19", "unassigned"];
 const statusValues: SegmentedTaskStatus[] = ["not-started", "in-progress", "blocked", "done"];
@@ -26,6 +29,10 @@ function nowIso() {
 
 function makeId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function normalizeLabel(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function isOwner(value: unknown): value is SegmentedTaskOwner {
@@ -126,7 +133,15 @@ async function persistBoard(board: SegmentedTaskBoard) {
 }
 
 function removeLegacySeedSegments(board: SegmentedTaskBoard) {
-  const segments = board.segments.filter((segment) => !legacySeedSegmentIds.has(segment.id));
+  const segments = board.segments.filter((segment) => {
+    const legacyTitle = legacySeedSegments.get(segment.id);
+    if (!legacyTitle) {
+      return true;
+    }
+
+    return normalizeLabel(segment.title) !== normalizeLabel(legacyTitle);
+  });
+
   if (segments.length === board.segments.length) {
     return { board, changed: false };
   }
