@@ -14,6 +14,7 @@ import type {
 
 const integrationSecretKey = "segmented-task-list-board-v1";
 let inMemoryBoard: SegmentedTaskBoard = structuredClone(seededSegmentedTaskBoard);
+const legacySeedSegmentIds = new Set(["segment-growth", "segment-operations"]);
 
 const ownerValues: SegmentedTaskOwner[] = ["dylan", "john", "shampt19", "unassigned"];
 const statusValues: SegmentedTaskStatus[] = ["not-started", "in-progress", "blocked", "done"];
@@ -124,6 +125,22 @@ async function persistBoard(board: SegmentedTaskBoard) {
   }
 }
 
+function removeLegacySeedSegments(board: SegmentedTaskBoard) {
+  const segments = board.segments.filter((segment) => !legacySeedSegmentIds.has(segment.id));
+  if (segments.length === board.segments.length) {
+    return { board, changed: false };
+  }
+
+  return {
+    board: {
+      ...board,
+      segments,
+      updatedAt: nowIso()
+    },
+    changed: true
+  };
+}
+
 type SegmentInput = {
   title: string;
   color?: string;
@@ -165,11 +182,17 @@ export const segmentedTaskListService = {
   async getBoard() {
     const supabaseBoard = await loadBoardFromIntegrationSecrets();
     if (supabaseBoard) {
-      inMemoryBoard = structuredClone(supabaseBoard);
-      return supabaseBoard;
+      const cleaned = removeLegacySeedSegments(supabaseBoard);
+      inMemoryBoard = structuredClone(cleaned.board);
+      if (cleaned.changed) {
+        await persistBoard(cleaned.board);
+      }
+      return cleaned.board;
     }
 
-    return structuredClone(inMemoryBoard);
+    const cleaned = removeLegacySeedSegments(inMemoryBoard);
+    inMemoryBoard = structuredClone(cleaned.board);
+    return structuredClone(cleaned.board);
   },
 
   async createSegment(input: SegmentInput) {
