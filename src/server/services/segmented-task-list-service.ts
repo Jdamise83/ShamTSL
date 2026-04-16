@@ -71,6 +71,10 @@ function parseBoardPayload(raw: string | null | undefined) {
   }
 }
 
+function isPersistenceConfigured() {
+  return createSupabaseAdminClient() !== null;
+}
+
 function findSegment(board: SegmentedTaskBoard, segmentId: string) {
   const segment = board.segments.find((item) => item.id === segmentId);
   if (!segment) {
@@ -111,24 +115,35 @@ async function loadBoardFromIntegrationSecrets() {
   }
 }
 
-async function persistBoard(board: SegmentedTaskBoard) {
+async function persistBoard(board: SegmentedTaskBoard, requireDurable = true) {
   inMemoryBoard = structuredClone(board);
 
   const admin = createSupabaseAdminClient();
   if (!admin) {
+    if (requireDurable) {
+      throw new Error(
+        "Task board persistence is not configured. Add SUPABASE_SERVICE_ROLE_KEY in Vercel to prevent data loss."
+      );
+    }
     return;
   }
 
   try {
-    await admin.from("integration_secrets").upsert(
+    const { error } = await admin.from("integration_secrets").upsert(
       {
         key: integrationSecretKey,
         value: JSON.stringify(board)
       },
       { onConflict: "key" }
     );
+
+    if (error) {
+      throw new Error(error.message);
+    }
   } catch {
-    // Keep in-memory value when persistence is unavailable.
+    if (requireDurable) {
+      throw new Error("Failed to persist task board to Supabase.");
+    }
   }
 }
 
@@ -194,13 +209,20 @@ function mutateSubtask(subtask: SegmentedSubtask, input: SubtaskInput) {
 }
 
 export const segmentedTaskListService = {
+  getPersistenceStatus() {
+    return {
+      durable: isPersistenceConfigured(),
+      mode: isPersistenceConfigured() ? "supabase" : "memory"
+    } as const;
+  },
+
   async getBoard() {
     const supabaseBoard = await loadBoardFromIntegrationSecrets();
     if (supabaseBoard) {
       const cleaned = removeLegacySeedSegments(supabaseBoard);
       inMemoryBoard = structuredClone(cleaned.board);
       if (cleaned.changed) {
-        await persistBoard(cleaned.board);
+        await persistBoard(cleaned.board, false);
       }
       return cleaned.board;
     }
@@ -229,7 +251,7 @@ export const segmentedTaskListService = {
 
     board.segments = [...board.segments, nextSegment];
     board.updatedAt = timestamp;
-    await persistBoard(board);
+    await persistBoard(board, true);
     return board;
   },
 
@@ -247,7 +269,7 @@ export const segmentedTaskListService = {
     }
     segment.updatedAt = nowIso();
     board.updatedAt = segment.updatedAt;
-    await persistBoard(board);
+    await persistBoard(board, true);
     return board;
   },
 
@@ -276,7 +298,7 @@ export const segmentedTaskListService = {
     segment.tasks = [...segment.tasks, task];
     segment.updatedAt = timestamp;
     board.updatedAt = timestamp;
-    await persistBoard(board);
+    await persistBoard(board, true);
     return board;
   },
 
@@ -287,7 +309,7 @@ export const segmentedTaskListService = {
     mutateTask(task, input);
     segment.updatedAt = task.updatedAt;
     board.updatedAt = task.updatedAt;
-    await persistBoard(board);
+    await persistBoard(board, true);
     return board;
   },
 
@@ -298,7 +320,7 @@ export const segmentedTaskListService = {
     const timestamp = nowIso();
     segment.updatedAt = timestamp;
     board.updatedAt = timestamp;
-    await persistBoard(board);
+    await persistBoard(board, true);
     return board;
   },
 
@@ -326,7 +348,7 @@ export const segmentedTaskListService = {
     task.updatedAt = timestamp;
     segment.updatedAt = timestamp;
     board.updatedAt = timestamp;
-    await persistBoard(board);
+    await persistBoard(board, true);
     return board;
   },
 
@@ -343,7 +365,7 @@ export const segmentedTaskListService = {
     task.updatedAt = subtask.updatedAt;
     segment.updatedAt = subtask.updatedAt;
     board.updatedAt = subtask.updatedAt;
-    await persistBoard(board);
+    await persistBoard(board, true);
     return board;
   },
 
@@ -356,7 +378,7 @@ export const segmentedTaskListService = {
     task.updatedAt = timestamp;
     segment.updatedAt = timestamp;
     board.updatedAt = timestamp;
-    await persistBoard(board);
+    await persistBoard(board, true);
     return board;
   }
 };

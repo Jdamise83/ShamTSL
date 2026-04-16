@@ -77,7 +77,7 @@ export async function GET() {
   }
 
   const board = await segmentedTaskListService.getBoard();
-  return NextResponse.json({ board });
+  return NextResponse.json({ board, persistence: segmentedTaskListService.getPersistenceStatus() });
 }
 
 export async function POST(request: NextRequest) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { GripVertical, Plus, Trash2 } from "lucide-react";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
@@ -85,6 +85,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
   const [board, setBoard] = useState(initialBoard);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null);
 
   const [taskTitleInput, setTaskTitleInput] = useState("");
   const [taskColorInput, setTaskColorInput] = useState(flatColorOptions[0].value);
@@ -97,14 +98,28 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
     [board]
   );
 
+  useEffect(() => {
+    void refreshBoardFromServer();
+  }, []);
+
   async function refreshBoardFromServer() {
     const response = await fetch("/api/segmented-task-list");
     if (!response.ok) {
       return null;
     }
 
-    const payload = (await response.json()) as { board: SegmentedTaskBoard };
+    const payload = (await response.json()) as {
+      board: SegmentedTaskBoard;
+      persistence?: { durable: boolean; mode: "supabase" | "memory" };
+    };
     setBoard(payload.board);
+    if (payload.persistence && !payload.persistence.durable) {
+      setPersistenceWarning(
+        "Task board is running in temporary memory mode. Add SUPABASE_SERVICE_ROLE_KEY in Vercel so data is saved permanently."
+      );
+    } else {
+      setPersistenceWarning(null);
+    }
     return payload.board;
   }
 
@@ -234,6 +249,11 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
 
   return (
     <div className="space-y-6">
+      {persistenceWarning ? (
+        <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {persistenceWarning}
+        </p>
+      ) : null}
       {error ? (
         <p className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
       ) : null}
