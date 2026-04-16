@@ -273,6 +273,16 @@ export const segmentedTaskListService = {
     return board;
   },
 
+  async deleteSegment(segmentId: string) {
+    const board = await this.getBoard();
+    const segment = findSegment(board, segmentId);
+    board.segments = board.segments.filter((item) => item.id !== segment.id);
+    const timestamp = nowIso();
+    board.updatedAt = timestamp;
+    await persistBoard(board);
+    return board;
+  },
+
   async createTask(segmentId: string, input: TaskInput) {
     const board = await this.getBoard();
     const segment = findSegment(board, segmentId);

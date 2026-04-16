@@ -33,6 +33,7 @@ type SubtaskInput = {
 type ActionPayload =
   | { action: "create-segment"; payload: SegmentInput }
   | { action: "update-segment"; payload: { segmentId: string } & SegmentInput }
+  | { action: "delete-segment"; payload: { segmentId: string } }
   | { action: "create-task"; payload: { segmentId: string; task: TaskInput } }
   | { action: "update-task"; payload: { segmentId: string; taskId: string; task: TaskInput } }
   | { action: "delete-task"; payload: { segmentId: string; taskId: string } }
@@ -96,6 +97,11 @@ export async function POST(request: NextRequest) {
 
     if (body.action === "update-segment") {
       const board = await segmentedTaskListService.updateSegment(body.payload.segmentId, body.payload);
+      return NextResponse.json({ board });
+    }
+
+    if (body.action === "delete-segment") {
+      const board = await segmentedTaskListService.deleteSegment(body.payload.segmentId);
       return NextResponse.json({ board });
     }
 

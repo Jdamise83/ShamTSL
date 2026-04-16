@@ -208,6 +208,28 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
     }
   }
 
+  async function removeMainTask(segmentId: string, title: string) {
+    const confirmed = window.confirm(
+      `Delete main task "${title}" and all task items inside it? This cannot be undone.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    const next = await postAction({
+      action: "delete-segment",
+      payload: { segmentId }
+    });
+
+    if (next) {
+      setTaskDraftsByGroup((previous) => {
+        const copy = { ...previous };
+        delete copy[segmentId];
+        return copy;
+      });
+    }
+  }
+
   async function removeTaskItem(segmentId: string, taskId: string) {
     await postAction({
       action: "delete-task",
@@ -324,9 +346,20 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
               style={{ borderLeft: `6px solid ${segment.color}` }}
             >
               <CardHeader className="border-b border-border/60 bg-muted/25 pb-4">
-                <CardTitle className="text-base uppercase tracking-[0.08em]">
-                  Task: {segment.title}
-                </CardTitle>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <CardTitle className="text-base uppercase tracking-[0.08em]">
+                    Task: {segment.title}
+                  </CardTitle>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    onClick={() => removeMainTask(segment.id, segment.title)}
+                    disabled={loading}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete Task
+                  </Button>
+                </div>
 
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-[2fr_170px_auto]">
                   <Input
