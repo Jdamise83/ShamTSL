@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, GripVertical, Pencil, Plus, Save, Trash2 } from "lucide-react";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
 import { EmptyState } from "@/components/dashboard/empty-state";
@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import type {
   SegmentedTask,
   SegmentedTaskBoard,
@@ -86,6 +87,10 @@ function ownerMeta(owner: SegmentedTaskOwner) {
   return ownerOptions.find((option) => option.value === owner) ?? ownerOptions[3];
 }
 
+function taskItemKey(segmentId: string, taskId: string) {
+  return `${segmentId}:${taskId}`;
+}
+
 function getInitialDraftForSegment(segmentId: string, drafts: Record<string, TaskCreateDraft>) {
   return drafts[segmentId] ?? { title: "", owner: "unassigned" };
 }
@@ -147,6 +152,8 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
   const [taskTitleInput, setTaskTitleInput] = useState("");
   const [taskColorInput, setTaskColorInput] = useState(flatColorOptions[0].value);
   const [taskDraftsByGroup, setTaskDraftsByGroup] = useState<Record<string, TaskCreateDraft>>({});
+  const [expandedTaskNotes, setExpandedTaskNotes] = useState<Record<string, boolean>>({});
+  const [taskNotesDraftById, setTaskNotesDraftById] = useState<Record<string, string>>({});
 
   const [draggingTask, setDraggingTask] = useState<{ segmentId: string; taskId: string } | null>(null);
 
@@ -167,6 +174,35 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
     void refreshBoardFromServer();
   }, []);
 
+  function syncTaskDraftState(nextBoard: SegmentedTaskBoard) {
+    const validTaskKeys = new Set<string>();
+    nextBoard.segments.forEach((segment) => {
+      segment.tasks.forEach((task) => {
+        validTaskKeys.add(taskItemKey(segment.id, task.id));
+      });
+    });
+
+    setExpandedTaskNotes((previous) => {
+      const next: Record<string, boolean> = {};
+      Object.entries(previous).forEach(([key, value]) => {
+        if (validTaskKeys.has(key)) {
+          next[key] = value;
+        }
+      });
+      return next;
+    });
+
+    setTaskNotesDraftById((previous) => {
+      const next: Record<string, string> = {};
+      Object.entries(previous).forEach(([key, value]) => {
+        if (validTaskKeys.has(key)) {
+          next[key] = value;
+        }
+      });
+      return next;
+    });
+  }
+
   async function refreshBoardFromServer() {
     const response = await fetch("/api/segmented-task-list");
     if (!response.ok) {
@@ -182,6 +218,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
 
     const payload = (await response.json()) as SegmentedTaskApiPayload;
     setBoard(payload.board);
+    syncTaskDraftState(payload.board);
     writeLocalBoardBackup(payload.board);
     if (payload.warning) {
       setPersistenceWarning(payload.warning);
@@ -223,6 +260,7 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
 
       const payload = (await response.json()) as SegmentedTaskApiPayload;
       setBoard(payload.board);
+      syncTaskDraftState(payload.board);
       writeLocalBoardBackup(payload.board);
       if (payload.warning) {
         setPersistenceWarning(payload.warning);
@@ -357,6 +395,46 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
           priority: task.priority,
           dueDate: task.dueDate,
           notes: task.notes
+        }
+      }
+    });
+  }
+
+  function toggleTaskNotes(segmentId: string, task: SegmentedTask) {
+    const key = taskItemKey(segmentId, task.id);
+    setExpandedTaskNotes((previous) => ({ ...previous, [key]: !previous[key] }));
+    setTaskNotesDraftById((previous) => {
+      if (typeof previous[key] === "string") {
+        return previous;
+      }
+
+      return { ...previous, [key]: task.notes ?? "" };
+    });
+  }
+
+  async function saveTaskNotes(segmentId: string, task: SegmentedTask) {
+    const key = taskItemKey(segmentId, task.id);
+    const draft = taskNotesDraftById[key] ?? task.notes ?? "";
+    const normalized = draft.trim();
+    const nextNotes = normalized ? draft.trimEnd() : null;
+    const currentNotes = task.notes ?? null;
+
+    if (currentNotes === nextNotes) {
+      return;
+    }
+
+    await postAction({
+      action: "update-task",
+      payload: {
+        segmentId,
+        taskId: task.id,
+        task: {
+          title: task.title,
+          owner: task.owner,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          notes: nextNotes
         }
       }
     });
@@ -599,10 +677,13 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                         {tasksByStatus[column.key].length ? (
                           tasksByStatus[column.key].map((task) => {
                             const owner = ownerMeta(task.owner);
+                            const taskKey = taskItemKey(segment.id, task.id);
+                            const notesExpanded = expandedTaskNotes[taskKey] === true;
+                            const notesDraft = taskNotesDraftById[taskKey] ?? task.notes ?? "";
                             return (
                               <div
                                 key={task.id}
-                                draggable
+                                draggable={!notesExpanded}
                                 onDragStart={(event) => {
                                   const payload = JSON.stringify({ segmentId: segment.id, taskId: task.id });
                                   event.dataTransfer.setData("application/json", payload);
@@ -665,6 +746,66 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                                         ))}
                                     </SelectContent>
                                   </Select>
+                                </div>
+
+                                <div className="mt-3">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-8 px-2 text-xs"
+                                    onClick={() => toggleTaskNotes(segment.id, task)}
+                                  >
+                                    {notesExpanded ? (
+                                      <ChevronUp className="mr-1 h-3.5 w-3.5" />
+                                    ) : (
+                                      <ChevronDown className="mr-1 h-3.5 w-3.5" />
+                                    )}
+                                    Notes
+                                  </Button>
+
+                                  {notesExpanded ? (
+                                    <div className="mt-2 space-y-2">
+                                      <Textarea
+                                        value={notesDraft}
+                                        onChange={(event) =>
+                                          setTaskNotesDraftById((previous) => ({
+                                            ...previous,
+                                            [taskKey]: event.target.value
+                                          }))
+                                        }
+                                        placeholder="Add detailed instructions for this subtask..."
+                                        className="min-h-[96px] text-xs"
+                                      />
+                                      <div className="flex items-center justify-end gap-2">
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={() =>
+                                            setTaskNotesDraftById((previous) => ({
+                                              ...previous,
+                                              [taskKey]: task.notes ?? ""
+                                            }))
+                                          }
+                                          disabled={loading}
+                                        >
+                                          Reset
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          onClick={() => saveTaskNotes(segment.id, task)}
+                                          disabled={loading}
+                                        >
+                                          <Save className="mr-1 h-3.5 w-3.5" />
+                                          Save Notes
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : task.notes?.trim() ? (
+                                    <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{task.notes}</p>
+                                  ) : null}
                                 </div>
                               </div>
                             );
