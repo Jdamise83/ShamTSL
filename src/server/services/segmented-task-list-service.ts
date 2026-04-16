@@ -15,6 +15,7 @@ import type {
 const integrationSecretKey = "segmented-task-list-board-v1";
 let inMemoryBoard: SegmentedTaskBoard = structuredClone(seededSegmentedTaskBoard);
 let hasLoadedDurableBoard = false;
+let lastPersistenceWarning: string | null = null;
 const legacySeedSegments = new Map<string, string>([
   ["segment-growth", "growth sprint"],
   ["segment-operations", "operations"]
@@ -173,8 +174,10 @@ async function persistBoard(board: SegmentedTaskBoard, requireDurable = isPersis
     if (error) {
       throw new Error(error.message);
     }
+    lastPersistenceWarning = null;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown Supabase write failure.";
+    lastPersistenceWarning = `Supabase sync warning: ${detail}`;
     if (requireDurable) {
       throw new TaskBoardPersistenceError(
         `Failed to persist task board to Supabase. ${detail}`,
@@ -249,7 +252,8 @@ export const segmentedTaskListService = {
   getPersistenceStatus() {
     return {
       durable: isPersistenceConfigured(),
-      mode: isPersistenceConfigured() ? "supabase" : "memory"
+      mode: isPersistenceConfigured() ? "supabase" : "memory",
+      warning: lastPersistenceWarning
     } as const;
   },
 
@@ -257,6 +261,7 @@ export const segmentedTaskListService = {
     const loadResult = await loadBoardFromIntegrationSecrets();
     if (loadResult.state === "ok") {
       hasLoadedDurableBoard = true;
+      lastPersistenceWarning = null;
       const cleaned = removeLegacySeedSegments(loadResult.board);
       inMemoryBoard = structuredClone(cleaned.board);
       if (cleaned.changed) {
@@ -266,18 +271,21 @@ export const segmentedTaskListService = {
     }
 
     if (loadResult.state === "error") {
-      if (hasLoadedDurableBoard) {
-        return structuredClone(inMemoryBoard);
-      }
-
-      throw new Error(`Failed to load task board from Supabase. ${loadResult.message}`);
+      lastPersistenceWarning = `Supabase sync warning: ${loadResult.message}`;
+      const cleaned = removeLegacySeedSegments(inMemoryBoard);
+      inMemoryBoard = structuredClone(cleaned.board);
+      return structuredClone(cleaned.board);
     }
 
     const cleaned = removeLegacySeedSegments(inMemoryBoard);
     inMemoryBoard = structuredClone(cleaned.board);
 
     if (loadResult.state === "not-found") {
-      await persistBoard(cleaned.board, false);
+      try {
+        await persistBoard(cleaned.board, false);
+      } catch {
+        // Ignore initial seed persistence failures; board remains available in memory.
+      }
     }
 
     return structuredClone(cleaned.board);

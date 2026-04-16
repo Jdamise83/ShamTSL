@@ -82,7 +82,8 @@ export async function GET() {
 
   try {
     const board = await segmentedTaskListService.getBoard();
-    return NextResponse.json({ board, persistence: segmentedTaskListService.getPersistenceStatus() });
+    const persistence = segmentedTaskListService.getPersistenceStatus();
+    return NextResponse.json({ board, warning: persistence.warning, persistence });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to load segmented task board." },
