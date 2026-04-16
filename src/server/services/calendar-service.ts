@@ -16,6 +16,8 @@ import type {
 
 let inMemoryCalendarEvents: CalendarEvent[] = structuredClone(seededCalendarEvents);
 const metadataPrefix = "[[TSL_META]]";
+const hiddenTaskBoardStorageTitle = "[[SEGMENTED_TASK_BOARD]]";
+const hiddenTaskBoardStorageLocation = "tsl://segmented-task-list/storage";
 const calendarScopes: CalendarScope[] = ["main", "personal", "brand-campaign", "campaigns"];
 const personalOwners: PersonalCalendarOwner[] = ["dylan", "john"];
 const brandCampaignTypes: BrandCampaignType[] = ["brand", "campaign", "meme-pages", "tsl-uk", "tsl-us"];
@@ -223,6 +225,10 @@ function mapEventRow(row: any): CalendarEvent {
   };
 }
 
+function isHiddenStorageEvent(row: { title?: string | null; location?: string | null }) {
+  return row.title === hiddenTaskBoardStorageTitle && row.location === hiddenTaskBoardStorageLocation;
+}
+
 function filterByDateRange(events: CalendarEvent[], start?: string, end?: string) {
   return events.filter((event) => {
     if (!start && !end) {
@@ -330,7 +336,7 @@ async function fetchSupabaseEvents(start?: string, end?: string, filters?: Calen
     throw new Error(`Failed to fetch calendar events: ${error.message}`);
   }
 
-  return (data ?? []).map(mapEventRow);
+  return (data ?? []).filter((row) => !isHiddenStorageEvent(row)).map(mapEventRow);
 }
 
 export const calendarService = {
@@ -380,6 +386,9 @@ export const calendarService = {
       }
 
       if (data) {
+        if (isHiddenStorageEvent(data)) {
+          return null;
+        }
         return mapEventRow(data);
       }
 

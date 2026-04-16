@@ -13,9 +13,13 @@ import type {
 } from "@/types/segmented-task-list";
 
 const integrationSecretKey = "segmented-task-list-board-v1";
+const fallbackStorageTitle = "[[SEGMENTED_TASK_BOARD]]";
+const fallbackStorageLocation = "tsl://segmented-task-list/storage";
+const fallbackStorageTimestamp = "2000-01-01T00:00:00.000Z";
 let inMemoryBoard: SegmentedTaskBoard = structuredClone(seededSegmentedTaskBoard);
 let hasLoadedDurableBoard = false;
 let lastPersistenceWarning: string | null = null;
+let activePersistenceBackend: "integration_secrets" | "calendar_events" | "memory" = "memory";
 const legacySeedSegments = new Map<string, string>([
   ["segment-growth", "growth sprint"],
   ["segment-operations", "operations"]
@@ -73,6 +77,22 @@ function parseBoardPayload(raw: string | null | undefined) {
   }
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown Supabase error.";
+}
+
+function isMissingIntegrationSecretsTableError(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("could not find the table 'public.integration_secrets'") ||
+    normalized.includes('relation "integration_secrets" does not exist')
+  );
+}
+
+function setWarning(message: string | null) {
+  lastPersistenceWarning = message;
+}
+
 export class TaskBoardPersistenceError extends Error {
   readonly board: SegmentedTaskBoard;
 
@@ -104,17 +124,13 @@ function findTask(segment: SegmentedTaskSegment, taskId: string) {
 }
 
 type BoardLoadResult =
-  | { state: "disabled" }
   | { state: "not-found" }
   | { state: "ok"; board: SegmentedTaskBoard }
   | { state: "error"; message: string };
 
-async function loadBoardFromIntegrationSecrets(): Promise<BoardLoadResult> {
-  const admin = createSupabaseAdminClient();
-  if (!admin) {
-    return { state: "disabled" };
-  }
+type SupabaseAdminClient = NonNullable<ReturnType<typeof createSupabaseAdminClient>>;
 
+async function loadBoardFromIntegrationSecrets(admin: SupabaseAdminClient): Promise<BoardLoadResult> {
   try {
     const { data, error } = await admin
       .from("integration_secrets")
@@ -140,10 +156,102 @@ async function loadBoardFromIntegrationSecrets(): Promise<BoardLoadResult> {
 
     return { state: "ok", board: parsed };
   } catch (error) {
-    return {
-      state: "error",
-      message: error instanceof Error ? error.message : "Unknown Supabase read failure."
-    };
+    return { state: "error", message: getErrorMessage(error) };
+  }
+}
+
+async function loadBoardFromCalendarEventFallback(admin: SupabaseAdminClient): Promise<BoardLoadResult> {
+  try {
+    const { data, error } = await admin
+      .from("calendar_events")
+      .select("internal_notes,updated_at")
+      .eq("title", fallbackStorageTitle)
+      .eq("location", fallbackStorageLocation)
+      .order("updated_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      return { state: "error", message: error.message };
+    }
+
+    const row = data?.[0];
+    if (!row?.internal_notes) {
+      return { state: "not-found" };
+    }
+
+    const parsed = parseBoardPayload(row.internal_notes);
+    if (!parsed) {
+      return {
+        state: "error",
+        message: "Stored task board payload in calendar_events is invalid JSON."
+      };
+    }
+
+    return { state: "ok", board: parsed };
+  } catch (error) {
+    return { state: "error", message: getErrorMessage(error) };
+  }
+}
+
+async function persistToIntegrationSecrets(admin: SupabaseAdminClient, board: SegmentedTaskBoard) {
+  const { error } = await admin.from("integration_secrets").upsert(
+    {
+      key: integrationSecretKey,
+      value: JSON.stringify(board)
+    },
+    { onConflict: "key" }
+  );
+
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function persistToCalendarEventFallback(admin: SupabaseAdminClient, board: SegmentedTaskBoard) {
+  const payload = JSON.stringify(board);
+
+  const { data: existingRows, error: readError } = await admin
+    .from("calendar_events")
+    .select("id")
+    .eq("title", fallbackStorageTitle)
+    .eq("location", fallbackStorageLocation)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  if (readError) {
+    throw new Error(readError.message);
+  }
+
+  const existingId = existingRows?.[0]?.id;
+  if (existingId) {
+    const { error: updateError } = await admin
+      .from("calendar_events")
+      .update({
+        internal_notes: payload,
+        updated_at: nowIso()
+      })
+      .eq("id", existingId);
+
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+    return;
+  }
+
+  const { error: insertError } = await admin.from("calendar_events").insert({
+    title: fallbackStorageTitle,
+    description: "Internal segmented task board storage",
+    location: fallbackStorageLocation,
+    meeting_link: null,
+    internal_notes: payload,
+    status: "cancelled",
+    starts_at: fallbackStorageTimestamp,
+    ends_at: fallbackStorageTimestamp,
+    created_by: null
+  });
+
+  if (insertError) {
+    throw new Error(insertError.message);
   }
 }
 
@@ -153,6 +261,8 @@ async function persistBoard(board: SegmentedTaskBoard, requireDurable = isPersis
 
   const admin = createSupabaseAdminClient();
   if (!admin) {
+    activePersistenceBackend = "memory";
+    setWarning("Task board is running in local memory mode. Save will reset on redeploy.");
     if (requireDurable) {
       throw new TaskBoardPersistenceError(
         "Task board persistence is not configured. Add SUPABASE_SERVICE_ROLE_KEY in Vercel to prevent data loss.",
@@ -163,21 +273,42 @@ async function persistBoard(board: SegmentedTaskBoard, requireDurable = isPersis
   }
 
   try {
-    const { error } = await admin.from("integration_secrets").upsert(
-      {
-        key: integrationSecretKey,
-        value: JSON.stringify(board)
-      },
-      { onConflict: "key" }
-    );
-
-    if (error) {
-      throw new Error(error.message);
+    if (activePersistenceBackend === "calendar_events") {
+      await persistToCalendarEventFallback(admin, nextBoard);
+      hasLoadedDurableBoard = true;
+      setWarning("Using calendar-backed storage for task board sync.");
+      return;
     }
-    lastPersistenceWarning = null;
+
+    await persistToIntegrationSecrets(admin, nextBoard);
+    activePersistenceBackend = "integration_secrets";
+    hasLoadedDurableBoard = true;
+    setWarning(null);
+    return;
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown Supabase write failure.";
-    lastPersistenceWarning = `Supabase sync warning: ${detail}`;
+    const detail = getErrorMessage(error);
+
+    if (isMissingIntegrationSecretsTableError(detail)) {
+      try {
+        await persistToCalendarEventFallback(admin, nextBoard);
+        activePersistenceBackend = "calendar_events";
+        hasLoadedDurableBoard = true;
+        setWarning("Using calendar-backed storage because integration_secrets is unavailable.");
+        return;
+      } catch (fallbackError) {
+        const fallbackDetail = getErrorMessage(fallbackError);
+        setWarning(`Supabase sync warning: ${fallbackDetail}`);
+        if (requireDurable) {
+          throw new TaskBoardPersistenceError(
+            `Failed to persist task board to Supabase. ${fallbackDetail}`,
+            nextBoard
+          );
+        }
+        return;
+      }
+    }
+
+    setWarning(`Supabase sync warning: ${detail}`);
     if (requireDurable) {
       throw new TaskBoardPersistenceError(
         `Failed to persist task board to Supabase. ${detail}`,
@@ -251,41 +382,98 @@ function mutateSubtask(subtask: SegmentedSubtask, input: SubtaskInput) {
 export const segmentedTaskListService = {
   getPersistenceStatus() {
     return {
-      durable: isPersistenceConfigured(),
-      mode: isPersistenceConfigured() ? "supabase" : "memory",
+      durable: activePersistenceBackend !== "memory",
+      mode: activePersistenceBackend === "memory" ? "memory" : "supabase",
+      backend: activePersistenceBackend,
       warning: lastPersistenceWarning
     } as const;
   },
 
   async getBoard() {
-    const loadResult = await loadBoardFromIntegrationSecrets();
-    if (loadResult.state === "ok") {
-      hasLoadedDurableBoard = true;
-      lastPersistenceWarning = null;
-      const cleaned = removeLegacySeedSegments(loadResult.board);
-      inMemoryBoard = structuredClone(cleaned.board);
-      if (cleaned.changed) {
-        await persistBoard(cleaned.board, false);
-      }
-      return cleaned.board;
-    }
-
-    if (loadResult.state === "error") {
-      lastPersistenceWarning = `Supabase sync warning: ${loadResult.message}`;
+    const admin = createSupabaseAdminClient();
+    if (!admin) {
+      activePersistenceBackend = "memory";
+      setWarning("Task board is running in local memory mode. Save will reset on redeploy.");
       const cleaned = removeLegacySeedSegments(inMemoryBoard);
       inMemoryBoard = structuredClone(cleaned.board);
       return structuredClone(cleaned.board);
     }
 
+    const loadFromFallback = async () => {
+      const fallbackResult = await loadBoardFromCalendarEventFallback(admin);
+      if (fallbackResult.state === "ok") {
+        activePersistenceBackend = "calendar_events";
+        hasLoadedDurableBoard = true;
+        setWarning("Using calendar-backed storage because integration_secrets is unavailable.");
+        const cleaned = removeLegacySeedSegments(fallbackResult.board);
+        inMemoryBoard = structuredClone(cleaned.board);
+        if (cleaned.changed) {
+          await persistBoard(cleaned.board, false);
+        }
+        return structuredClone(cleaned.board);
+      }
+
+      if (fallbackResult.state === "error") {
+        activePersistenceBackend = "memory";
+        setWarning(`Supabase sync warning: ${fallbackResult.message}`);
+      } else {
+        activePersistenceBackend = "calendar_events";
+        setWarning("Using calendar-backed storage because integration_secrets is unavailable.");
+      }
+
+      const cleaned = removeLegacySeedSegments(inMemoryBoard);
+      inMemoryBoard = structuredClone(cleaned.board);
+      try {
+        await persistToCalendarEventFallback(admin, cleaned.board);
+        hasLoadedDurableBoard = true;
+      } catch (error) {
+        activePersistenceBackend = "memory";
+        setWarning(`Supabase sync warning: ${getErrorMessage(error)}`);
+      }
+      return structuredClone(cleaned.board);
+    };
+
+    const loadResult = await loadBoardFromIntegrationSecrets(admin);
+    if (loadResult.state === "ok") {
+      activePersistenceBackend = "integration_secrets";
+      hasLoadedDurableBoard = true;
+      setWarning(null);
+      const cleaned = removeLegacySeedSegments(loadResult.board);
+      inMemoryBoard = structuredClone(cleaned.board);
+      if (cleaned.changed) {
+        await persistBoard(cleaned.board, false);
+      }
+      return structuredClone(cleaned.board);
+    }
+
+    if (loadResult.state === "error") {
+      if (isMissingIntegrationSecretsTableError(loadResult.message)) {
+        return loadFromFallback();
+      }
+
+      if (hasLoadedDurableBoard) {
+        setWarning(`Supabase sync warning: ${loadResult.message}`);
+        return structuredClone(inMemoryBoard);
+      }
+
+      activePersistenceBackend = "memory";
+      setWarning(`Supabase sync warning: ${loadResult.message}`);
+      const cleaned = removeLegacySeedSegments(inMemoryBoard);
+      inMemoryBoard = structuredClone(cleaned.board);
+      return structuredClone(cleaned.board);
+    }
+
+    // integration_secrets table exists but key row not yet created: seed it.
+    activePersistenceBackend = "integration_secrets";
+    setWarning(null);
+
     const cleaned = removeLegacySeedSegments(inMemoryBoard);
     inMemoryBoard = structuredClone(cleaned.board);
 
-    if (loadResult.state === "not-found") {
-      try {
-        await persistBoard(cleaned.board, false);
-      } catch {
-        // Ignore initial seed persistence failures; board remains available in memory.
-      }
+    try {
+      await persistBoard(cleaned.board, false);
+    } catch {
+      // Ignore initial seed persistence failures; board remains available.
     }
 
     return structuredClone(cleaned.board);
