@@ -115,7 +115,7 @@ async function loadBoardFromIntegrationSecrets() {
   }
 }
 
-async function persistBoard(board: SegmentedTaskBoard, requireDurable = false) {
+async function persistBoard(board: SegmentedTaskBoard, requireDurable = isPersistenceConfigured()) {
   inMemoryBoard = structuredClone(board);
 
   const admin = createSupabaseAdminClient();
@@ -222,7 +222,7 @@ export const segmentedTaskListService = {
       const cleaned = removeLegacySeedSegments(supabaseBoard);
       inMemoryBoard = structuredClone(cleaned.board);
       if (cleaned.changed) {
-        await persistBoard(cleaned.board);
+        await persistBoard(cleaned.board, false);
       }
       return cleaned.board;
     }

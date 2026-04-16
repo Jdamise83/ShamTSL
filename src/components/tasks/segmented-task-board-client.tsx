@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { GripVertical, Plus, Trash2 } from "lucide-react";
+import { GripVertical, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { CalendarShell } from "@/components/calendar/calendar-shell";
 import { EmptyState } from "@/components/dashboard/empty-state";
@@ -208,6 +208,79 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
     }
   }
 
+  async function renameMainTask(segmentId: string, currentTitle: string, currentColor: string) {
+    const nextTitle = window.prompt("Rename main task:", currentTitle);
+    if (nextTitle === null) {
+      return;
+    }
+
+    const trimmed = nextTitle.trim();
+    if (!trimmed) {
+      setError("Main task title cannot be empty.");
+      return;
+    }
+
+    await postAction({
+      action: "update-segment",
+      payload: {
+        segmentId,
+        title: trimmed,
+        color: currentColor
+      }
+    });
+  }
+
+  async function renameTaskItem(segmentId: string, task: SegmentedTask) {
+    const nextTitle = window.prompt("Rename task item:", task.title);
+    if (nextTitle === null) {
+      return;
+    }
+
+    const trimmed = nextTitle.trim();
+    if (!trimmed) {
+      setError("Task item title cannot be empty.");
+      return;
+    }
+
+    await postAction({
+      action: "update-task",
+      payload: {
+        segmentId,
+        taskId: task.id,
+        task: {
+          title: trimmed,
+          owner: task.owner,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          notes: task.notes
+        }
+      }
+    });
+  }
+
+  async function reassignTaskItem(segmentId: string, task: SegmentedTask, nextOwner: SegmentedTaskOwner) {
+    if (task.owner === nextOwner) {
+      return;
+    }
+
+    await postAction({
+      action: "update-task",
+      payload: {
+        segmentId,
+        taskId: task.id,
+        task: {
+          title: task.title,
+          owner: nextOwner,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          notes: task.notes
+        }
+      }
+    });
+  }
+
   async function removeMainTask(segmentId: string, title: string) {
     const confirmed = window.confirm(
       `Delete main task "${title}" and all task items inside it? This cannot be undone.`
@@ -350,15 +423,26 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                   <CardTitle className="text-base uppercase tracking-[0.08em]">
                     Task: {segment.title}
                   </CardTitle>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    onClick={() => removeMainTask(segment.id, segment.title)}
-                    disabled={loading}
-                  >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Delete Task
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => renameMainTask(segment.id, segment.title, segment.color)}
+                      disabled={loading}
+                    >
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Rename
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => removeMainTask(segment.id, segment.title)}
+                      disabled={loading}
+                    >
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Task
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-[2fr_170px_auto]">
@@ -452,15 +536,26 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                                     <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                                     <p className="text-sm font-semibold text-foreground">{task.title}</p>
                                   </div>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-8 w-8 p-0 text-danger"
-                                    onClick={() => removeTaskItem(segment.id, task.id)}
-                                    disabled={loading}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0"
+                                      onClick={() => renameTaskItem(segment.id, task)}
+                                      disabled={loading}
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-8 w-8 p-0 text-danger"
+                                      onClick={() => removeTaskItem(segment.id, task.id)}
+                                      disabled={loading}
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
                                 </div>
 
                                 <div className="mt-2 flex items-center gap-2">
@@ -470,6 +565,25 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
                                   >
                                     {owner.label}
                                   </span>
+                                  <Select
+                                    value={task.owner}
+                                    onValueChange={(value) =>
+                                      reassignTaskItem(segment.id, task, value as SegmentedTaskOwner)
+                                    }
+                                  >
+                                    <SelectTrigger className="h-8 w-[130px] text-xs">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {ownerOptions
+                                        .filter((option) => option.value !== "unassigned")
+                                        .map((option) => (
+                                          <SelectItem key={option.value} value={option.value}>
+                                            {option.label}
+                                          </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                  </Select>
                                 </div>
                               </div>
                             );
