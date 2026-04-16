@@ -14,6 +14,7 @@ import type {
 
 const integrationSecretKey = "segmented-task-list-board-v1";
 let inMemoryBoard: SegmentedTaskBoard = structuredClone(seededSegmentedTaskBoard);
+let hasLoadedDurableBoard = false;
 const legacySeedSegments = new Map<string, string>([
   ["segment-growth", "growth sprint"],
   ["segment-operations", "operations"]
@@ -71,6 +72,16 @@ function parseBoardPayload(raw: string | null | undefined) {
   }
 }
 
+export class TaskBoardPersistenceError extends Error {
+  readonly board: SegmentedTaskBoard;
+
+  constructor(message: string, board: SegmentedTaskBoard) {
+    super(message);
+    this.name = "TaskBoardPersistenceError";
+    this.board = structuredClone(board);
+  }
+}
+
 function isPersistenceConfigured() {
   return createSupabaseAdminClient() !== null;
 }
@@ -91,10 +102,16 @@ function findTask(segment: SegmentedTaskSegment, taskId: string) {
   return task;
 }
 
-async function loadBoardFromIntegrationSecrets() {
+type BoardLoadResult =
+  | { state: "disabled" }
+  | { state: "not-found" }
+  | { state: "ok"; board: SegmentedTaskBoard }
+  | { state: "error"; message: string };
+
+async function loadBoardFromIntegrationSecrets(): Promise<BoardLoadResult> {
   const admin = createSupabaseAdminClient();
   if (!admin) {
-    return null;
+    return { state: "disabled" };
   }
 
   try {
@@ -105,24 +122,40 @@ async function loadBoardFromIntegrationSecrets() {
       .maybeSingle();
 
     if (error) {
-      return null;
+      return { state: "error", message: error.message };
     }
 
-    const parsed = parseBoardPayload(data?.value);
-    return parsed;
-  } catch {
-    return null;
+    if (!data?.value) {
+      return { state: "not-found" };
+    }
+
+    const parsed = parseBoardPayload(data.value);
+    if (!parsed) {
+      return {
+        state: "error",
+        message: "Stored task board payload is invalid JSON."
+      };
+    }
+
+    return { state: "ok", board: parsed };
+  } catch (error) {
+    return {
+      state: "error",
+      message: error instanceof Error ? error.message : "Unknown Supabase read failure."
+    };
   }
 }
 
 async function persistBoard(board: SegmentedTaskBoard, requireDurable = isPersistenceConfigured()) {
-  inMemoryBoard = structuredClone(board);
+  const nextBoard = structuredClone(board);
+  inMemoryBoard = nextBoard;
 
   const admin = createSupabaseAdminClient();
   if (!admin) {
     if (requireDurable) {
-      throw new Error(
-        "Task board persistence is not configured. Add SUPABASE_SERVICE_ROLE_KEY in Vercel to prevent data loss."
+      throw new TaskBoardPersistenceError(
+        "Task board persistence is not configured. Add SUPABASE_SERVICE_ROLE_KEY in Vercel to prevent data loss.",
+        nextBoard
       );
     }
     return;
@@ -140,9 +173,13 @@ async function persistBoard(board: SegmentedTaskBoard, requireDurable = isPersis
     if (error) {
       throw new Error(error.message);
     }
-  } catch {
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown Supabase write failure.";
     if (requireDurable) {
-      throw new Error("Failed to persist task board to Supabase.");
+      throw new TaskBoardPersistenceError(
+        `Failed to persist task board to Supabase. ${detail}`,
+        nextBoard
+      );
     }
   }
 }
@@ -217,9 +254,10 @@ export const segmentedTaskListService = {
   },
 
   async getBoard() {
-    const supabaseBoard = await loadBoardFromIntegrationSecrets();
-    if (supabaseBoard) {
-      const cleaned = removeLegacySeedSegments(supabaseBoard);
+    const loadResult = await loadBoardFromIntegrationSecrets();
+    if (loadResult.state === "ok") {
+      hasLoadedDurableBoard = true;
+      const cleaned = removeLegacySeedSegments(loadResult.board);
       inMemoryBoard = structuredClone(cleaned.board);
       if (cleaned.changed) {
         await persistBoard(cleaned.board, false);
@@ -227,8 +265,21 @@ export const segmentedTaskListService = {
       return cleaned.board;
     }
 
+    if (loadResult.state === "error") {
+      if (hasLoadedDurableBoard) {
+        return structuredClone(inMemoryBoard);
+      }
+
+      throw new Error(`Failed to load task board from Supabase. ${loadResult.message}`);
+    }
+
     const cleaned = removeLegacySeedSegments(inMemoryBoard);
     inMemoryBoard = structuredClone(cleaned.board);
+
+    if (loadResult.state === "not-found") {
+      await persistBoard(cleaned.board, false);
+    }
+
     return structuredClone(cleaned.board);
   },
 

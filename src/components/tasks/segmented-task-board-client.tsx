@@ -32,6 +32,13 @@ interface TaskCreateDraft {
   owner: SegmentedTaskOwner;
 }
 
+interface SegmentedTaskApiPayload {
+  board: SegmentedTaskBoard;
+  warning?: string;
+  error?: string;
+  persistence?: { durable: boolean; mode: "supabase" | "memory" };
+}
+
 type BoardStatus = "not-started" | "in-progress" | "done";
 
 const ownerOptions: Array<{ value: SegmentedTaskOwner; label: string; color: string }> = [
@@ -60,6 +67,8 @@ const columns: Array<{ key: BoardStatus; label: string }> = [
   { key: "done", label: "Completed" }
 ];
 
+const localBoardBackupKey = "tsl-segmented-task-list-board-v1";
+
 function normalizeStatus(status: SegmentedTaskStatus): BoardStatus {
   if (status === "blocked") {
     return "in-progress";
@@ -81,6 +90,54 @@ function getInitialDraftForSegment(segmentId: string, drafts: Record<string, Tas
   return drafts[segmentId] ?? { title: "", owner: "unassigned" };
 }
 
+function parseTimestamp(value: string) {
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function isSegmentedBoard(value: unknown): value is SegmentedTaskBoard {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as Partial<SegmentedTaskBoard>;
+  return typeof candidate.updatedAt === "string" && Array.isArray(candidate.segments);
+}
+
+function readLocalBoardBackup() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(localBoardBackupKey);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!isSegmentedBoard(parsed)) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalBoardBackup(board: SegmentedTaskBoard) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(localBoardBackupKey, JSON.stringify(board));
+  } catch {
+    // Ignore local backup write failures (storage restrictions/private mode).
+  }
+}
+
 export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardClientProps) {
   const [board, setBoard] = useState(initialBoard);
   const [loading, setLoading] = useState(false);
@@ -99,20 +156,38 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
   );
 
   useEffect(() => {
+    const backup = readLocalBoardBackup();
+    if (backup && parseTimestamp(backup.updatedAt) > parseTimestamp(initialBoard.updatedAt)) {
+      setBoard(backup);
+      setPersistenceWarning(
+        "Recovered your latest task board from local backup while Supabase sync reconnects."
+      );
+    }
+
     void refreshBoardFromServer();
   }, []);
 
   async function refreshBoardFromServer() {
     const response = await fetch("/api/segmented-task-list");
     if (!response.ok) {
+      const backup = readLocalBoardBackup();
+      if (backup) {
+        setBoard(backup);
+        setPersistenceWarning(
+          "Using your local task-board backup because Supabase could not be reached right now."
+        );
+      }
       return null;
     }
 
-    const payload = (await response.json()) as {
-      board: SegmentedTaskBoard;
-      persistence?: { durable: boolean; mode: "supabase" | "memory" };
-    };
+    const payload = (await response.json()) as SegmentedTaskApiPayload;
     setBoard(payload.board);
+    writeLocalBoardBackup(payload.board);
+    if (payload.warning) {
+      setPersistenceWarning(payload.warning);
+      return payload.board;
+    }
+
     if (payload.persistence && !payload.persistence.durable) {
       setPersistenceWarning(
         "Task board is running in temporary memory mode. Add SUPABASE_SERVICE_ROLE_KEY in Vercel so data is saved permanently."
@@ -146,8 +221,14 @@ export function SegmentedTaskBoardClient({ initialBoard }: SegmentedTaskBoardCli
         throw new Error(message);
       }
 
-      const payload = (await response.json()) as { board: SegmentedTaskBoard };
+      const payload = (await response.json()) as SegmentedTaskApiPayload;
       setBoard(payload.board);
+      writeLocalBoardBackup(payload.board);
+      if (payload.warning) {
+        setPersistenceWarning(payload.warning);
+      } else {
+        setPersistenceWarning(null);
+      }
       return payload.board;
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Task board action failed.");

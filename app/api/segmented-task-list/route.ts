@@ -3,7 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { resolveDashboardAccessLevel } from "@/lib/access-control";
 import { hasSupabaseBrowserConfig } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { segmentedTaskListService } from "@/server/services";
+import {
+  segmentedTaskListService,
+  TaskBoardPersistenceError
+} from "@/server/services/segmented-task-list-service";
 import type {
   SegmentedTaskOwner,
   SegmentedTaskPriority,
@@ -77,8 +80,15 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const board = await segmentedTaskListService.getBoard();
-  return NextResponse.json({ board, persistence: segmentedTaskListService.getPersistenceStatus() });
+  try {
+    const board = await segmentedTaskListService.getBoard();
+    return NextResponse.json({ board, persistence: segmentedTaskListService.getPersistenceStatus() });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to load segmented task board." },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -152,6 +162,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ board });
     }
   } catch (error) {
+    if (error instanceof TaskBoardPersistenceError) {
+      return NextResponse.json(
+        {
+          board: error.board,
+          warning: error.message,
+          persistence: segmentedTaskListService.getPersistenceStatus()
+        },
+        { status: 200 }
+      );
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Segmented task action failed." },
       { status: 400 }
