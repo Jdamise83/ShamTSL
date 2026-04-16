@@ -115,7 +115,7 @@ async function loadBoardFromIntegrationSecrets() {
   }
 }
 
-async function persistBoard(board: SegmentedTaskBoard, requireDurable = true) {
+async function persistBoard(board: SegmentedTaskBoard, requireDurable = false) {
   inMemoryBoard = structuredClone(board);
 
   const admin = createSupabaseAdminClient();
@@ -222,7 +222,7 @@ export const segmentedTaskListService = {
       const cleaned = removeLegacySeedSegments(supabaseBoard);
       inMemoryBoard = structuredClone(cleaned.board);
       if (cleaned.changed) {
-        await persistBoard(cleaned.board, false);
+        await persistBoard(cleaned.board);
       }
       return cleaned.board;
     }
@@ -251,7 +251,7 @@ export const segmentedTaskListService = {
 
     board.segments = [...board.segments, nextSegment];
     board.updatedAt = timestamp;
-    await persistBoard(board, true);
+    await persistBoard(board);
     return board;
   },
 
@@ -269,7 +269,7 @@ export const segmentedTaskListService = {
     }
     segment.updatedAt = nowIso();
     board.updatedAt = segment.updatedAt;
-    await persistBoard(board, true);
+    await persistBoard(board);
     return board;
   },
 
@@ -298,7 +298,7 @@ export const segmentedTaskListService = {
     segment.tasks = [...segment.tasks, task];
     segment.updatedAt = timestamp;
     board.updatedAt = timestamp;
-    await persistBoard(board, true);
+    await persistBoard(board);
     return board;
   },
 
@@ -309,7 +309,7 @@ export const segmentedTaskListService = {
     mutateTask(task, input);
     segment.updatedAt = task.updatedAt;
     board.updatedAt = task.updatedAt;
-    await persistBoard(board, true);
+    await persistBoard(board);
     return board;
   },
 
@@ -320,7 +320,7 @@ export const segmentedTaskListService = {
     const timestamp = nowIso();
     segment.updatedAt = timestamp;
     board.updatedAt = timestamp;
-    await persistBoard(board, true);
+    await persistBoard(board);
     return board;
   },
 
@@ -348,7 +348,7 @@ export const segmentedTaskListService = {
     task.updatedAt = timestamp;
     segment.updatedAt = timestamp;
     board.updatedAt = timestamp;
-    await persistBoard(board, true);
+    await persistBoard(board);
     return board;
   },
 
@@ -365,7 +365,7 @@ export const segmentedTaskListService = {
     task.updatedAt = subtask.updatedAt;
     segment.updatedAt = subtask.updatedAt;
     board.updatedAt = subtask.updatedAt;
-    await persistBoard(board, true);
+    await persistBoard(board);
     return board;
   },
 
@@ -378,7 +378,7 @@ export const segmentedTaskListService = {
     task.updatedAt = timestamp;
     segment.updatedAt = timestamp;
     board.updatedAt = timestamp;
-    await persistBoard(board, true);
+    await persistBoard(board);
     return board;
   }
 };
